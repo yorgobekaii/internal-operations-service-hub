@@ -8,14 +8,16 @@ This repository represents the **v0.1 Product Foundation** for the Internal Requ
 
 ## **Repository Structure**
 
-`.`  
-`├── README.md                 # Project entry point and foundational overview`  
-`└── docs/`  
-    `├── product-spec.md       # Product requirements, functional pillars, and user workflows`  
-    `├── architecture.md       # System boundaries, component layout, and operational security`  
-    `├── data-model.md         # Domain entities, deterministic state machine, and indexing strategy`  
-    `└── decisions/`  
-        `└── ADR-001.md        # Decision record: Audit history tracking vs. state overwriting`
+```text
+.
+├── README.md                 # Project entry point and foundational overview
+└── docs/
+    ├── product-spec.md       # Product requirements, functional pillars, and user workflows
+    ├── architecture.md       # System boundaries, component layout, and operational security
+    ├── data-model.md         # Domain entities, deterministic state machine, and indexing strategy
+    └── decisions/
+        └── ADR-001.md        # Decision record: Audit history tracking vs. state overwriting
+```
 
 ## **Documentation Overview**
 
