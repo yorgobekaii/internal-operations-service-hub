@@ -10,13 +10,13 @@ This repository represents the **v0.1 Product Foundation** for the Internal Requ
 
 ```text
 .
-├── README.md                 # Project entry point and foundational overview
-└── docs/
-    ├── product-spec.md       # Product requirements, functional pillars, and user workflows
-    ├── architecture.md       # System boundaries, component layout, and operational security
-    ├── data-model.md         # Domain entities, deterministic state machine, and indexing strategy
-    └── decisions/
-        └── ADR-001.md        # Decision record: Audit history tracking vs. state overwriting
+├── apps/
+│   ├── backend/              # NestJS Core API (v0.2 Foundation)
+│   └── frontend/             # Future React/NextJS application
+├── packages/
+│   └── shared/               # Shared DTOs, Enums, and Types
+├── docs/                     # Project documentation
+└── package.json              # NPM Workspaces Root
 ```
 
 ## **Documentation Overview**
@@ -37,13 +37,13 @@ This repository represents the **v0.1 Product Foundation** for the Internal Requ
 The v0.2 milestone implements the foundational NestJS application and an in-memory state machine for the service-requests lifecycle. 
 
 ### **Setup & Startup**
-1. Install dependencies:
+1. Install dependencies from the root (this will bootstrap all workspaces):
    ```bash
    npm install
    ```
-2. Start the development server:
+2. Start the development server for the backend workspace:
    ```bash
-   npm run start:dev
+   npm run start:backend
    ```
    The API will be available at `http://localhost:3000`.
 
