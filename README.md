@@ -31,3 +31,69 @@ This repository represents the **v0.1 Product Foundation** for the Internal Requ
 > * **Coherence:** All specification, architectural, and data modeling choices directly map back to internal intake requirements.  
 > * **Data Model Reasoning:** Relational storage is justified through strict transactional constraints on state machine transitions.  
 > * **Traceability:** Every design choice is traceable from product spec requirements to architecture and data schemas.
+
+## **v0.2 Milestone: Quick Start & Verification**
+
+The v0.2 milestone implements the foundational NestJS application and an in-memory state machine for the service-requests lifecycle. 
+
+### **Setup & Startup**
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Start the development server:
+   ```bash
+   npm run start:dev
+   ```
+   The API will be available at `http://localhost:3000`.
+
+### **Testing the State Machine**
+Verify the 4 core state machine invariants using the following curl commands.
+
+#### **1. Create Request (Initializes as `Submitted`)**
+```bash
+curl -X POST http://localhost:3000/service-requests \
+-H "Content-Type: application/json" \
+-d '{"title": "Need new laptop", "category": "IT"}'
+```
+*Expected Output: `201 Created` with `{"status": "Submitted", ...}`*
+
+#### **2. Valid Transition: `Submitted` -> `In Progress`**
+```bash
+curl -X PATCH http://localhost:3000/service-requests/1/status \
+-H "Content-Type: application/json" \
+-d '{"status": "In Progress"}'
+```
+*Expected Output: `200 OK` with `{"status": "In Progress", ...}`*
+
+#### **3. Valid Transition: `In Progress` -> `Resolved`**
+```bash
+curl -X PATCH http://localhost:3000/service-requests/1/status \
+-H "Content-Type: application/json" \
+-d '{"status": "Resolved"}'
+```
+*Expected Output: `200 OK` with `{"status": "Resolved", ...}`*
+
+#### **4. Invalid Transition: Mutating Immutable State (Fails)**
+Once a request is `Resolved`, it cannot be updated.
+```bash
+curl -X PATCH http://localhost:3000/service-requests/1/status \
+-H "Content-Type: application/json" \
+-d '{"status": "In Progress"}'
+```
+*Expected Output: `422 Unprocessable Entity` with message "Request is immutable and cannot be updated"*
+
+#### **Bonus: Invalid Transition: Skipping States (Fails)**
+You cannot transition directly from `Submitted` to `Resolved`.
+```bash
+# Create a new request (ID: 2)
+curl -X POST http://localhost:3000/service-requests \
+-H "Content-Type: application/json" \
+-d '{"title": "Software License", "category": "IT"}'
+
+# Attempt illegal skip
+curl -X PATCH http://localhost:3000/service-requests/2/status \
+-H "Content-Type: application/json" \
+-d '{"status": "Resolved"}'
+```
+*Expected Output: `400 Bad Request` with message "Invalid state transition"*
