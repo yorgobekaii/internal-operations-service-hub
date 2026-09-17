@@ -1,10 +1,14 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from './../src/app.module';
+import { PrismaService } from './../src/prisma/prisma.service';
+import { USER_ROLE_HEADER } from '@internal/shared';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
+  const createdIds: string[] = [];
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -12,19 +16,38 @@ describe('AppController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
     await app.init();
-  });
+    prisma = app.get(PrismaService);
+  }, 60000);
 
   afterAll(async () => {
+    if (createdIds.length > 0) {
+      await prisma.serviceRequest.deleteMany({
+        where: { id: { in: createdIds } },
+      });
+    }
     await app.close();
   });
 
-  it('2-Backend-to-database integration test: Should persist and retrieve a ServiceRequest via SQLite', async () => {
-    const postRes = await request(app.getHttpServer())
+  async function createRequest(title = 'E2E Test DB', category = 'Finance') {
+    const res = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E Test DB', category: 'Finance' })
+      .send({ title, category })
       .expect(201);
-      
+    createdIds.push(res.body.id);
+    return res;
+  }
+
+  it('2-Backend-to-database integration test: Should persist and retrieve a ServiceRequest via SQLite', async () => {
+    const postRes = await createRequest('E2E Test DB', 'Finance');
+
     expect(postRes.body.id).toBeDefined();
     expect(postRes.body.title).toBe('E2E Test DB');
 
@@ -34,5 +57,129 @@ describe('AppController (e2e)', () => {
 
     expect(getRes.body.id).toBe(postRes.body.id);
     expect(getRes.body.title).toBe('E2E Test DB');
+  });
+
+  it('3-Meaningful E2E test: Full POST -> PATCH -> GET lifecycle (Submitted -> In Progress -> Resolved)', async () => {
+    const postRes = await createRequest('E2E Lifecycle', 'IT');
+    const id = postRes.body.id;
+    expect(postRes.body.status).toBe('Submitted');
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.status !== 'In Progress') throw new Error('Expected In Progress');
+      });
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'admin')
+      .send({ status: 'Resolved' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.status !== 'Resolved') throw new Error('Expected Resolved');
+      });
+
+    const getRes = await request(app.getHttpServer())
+      .get(`/service-requests/${id}`)
+      .expect(200);
+    expect(getRes.body.status).toBe('Resolved');
+  });
+
+  it('Authorization allowed: PATCH with x-user-role operator succeeds (200)', async () => {
+    const postRes = await createRequest('E2E Auth Allowed', 'HR');
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${postRes.body.id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200);
+  });
+
+  it('Authorization denied: PATCH without role header returns 403', async () => {
+    const postRes = await createRequest('E2E Auth Denied', 'HR');
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${postRes.body.id}/status`)
+      .send({ status: 'In Progress' })
+      .expect(403);
+  });
+
+  it('Authorization denied: PATCH with non-operator role returns 403', async () => {
+    const postRes = await createRequest('E2E Auth Wrong Role', 'HR');
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${postRes.body.id}/status`)
+      .set(USER_ROLE_HEADER, 'viewer')
+      .send({ status: 'In Progress' })
+      .expect(403);
+  });
+
+  it('Invalid request: POST with empty title returns 400', async () => {
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: '', category: 'IT' })
+      .expect(400);
+  });
+
+  it('Invalid request: POST with missing category returns 400', async () => {
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'No category' })
+      .expect(400);
+  });
+
+  it('Invalid request: PATCH with unknown status returns 400', async () => {
+    const postRes = await createRequest('E2E Bad Status', 'IT');
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${postRes.body.id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Flying' })
+      .expect(400);
+  });
+
+  it('Invalid transition: Submitted -> Resolved returns 400', async () => {
+    const postRes = await createRequest('E2E Illegal Skip', 'IT');
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${postRes.body.id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Resolved' })
+      .expect(400);
+  });
+
+  it('Expected failure: GET non-existent ID returns 404', async () => {
+    await request(app.getHttpServer())
+      .get('/service-requests/non-existent-id-12345')
+      .expect(404);
+  });
+
+  it('Expected failure: PATCH non-existent ID returns 404', async () => {
+    await request(app.getHttpServer())
+      .patch('/service-requests/non-existent-id-12345/status')
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(404);
+  });
+
+  it('Immutable: PATCH on Resolved request returns 422', async () => {
+    const postRes = await createRequest('E2E Immutable', 'Operations');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Resolved' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(422);
   });
 });

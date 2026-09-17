@@ -1,0 +1,8 @@
+{
+  "name": "@internal/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Explicit API contract shared by frontend and backend",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

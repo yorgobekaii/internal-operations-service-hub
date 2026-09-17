@@ -1,8 +1,15 @@
 'use server'
 
 import { revalidatePath } from 'next/cache';
+import {
+  SERVICE_REQUEST_ROUTES,
+  USER_ROLE_HEADER,
+  type ServiceRequestStatus,
+} from '@internal/shared';
 
-const API_URL = 'http://localhost:3000/service-requests';
+const API_BASE = 'http://localhost:3000';
+const API_URL = `${API_BASE}${SERVICE_REQUEST_ROUTES.base}`;
+const OPERATOR_ROLE = 'operator';
 
 export async function createServiceRequest(formData: FormData) {
   const title = formData.get('title') as string;
@@ -33,12 +40,13 @@ export async function createServiceRequest(formData: FormData) {
   }
 }
 
-export async function updateServiceRequestStatus(id: string, status: string) {
+export async function updateServiceRequestStatus(id: string, status: ServiceRequestStatus) {
   try {
     const res = await fetch(`${API_URL}/${id}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
+        [USER_ROLE_HEADER]: OPERATOR_ROLE,
       },
       body: JSON.stringify({ status }),
     });

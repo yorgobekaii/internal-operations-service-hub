@@ -1,4 +1,6 @@
-export type ServiceRequestStatus = 'Submitted' | 'In Progress' | 'Resolved';
+import type { ServiceRequestStatus as SharedStatus } from '@internal/shared';
+
+export type ServiceRequestStatus = SharedStatus;
 
 export class ServiceRequest {
   id: string;

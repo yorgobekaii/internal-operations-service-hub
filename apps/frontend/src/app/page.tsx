@@ -1,7 +1,8 @@
 ﻿import { createServiceRequest, updateServiceRequestStatus } from './actions';
+import type { ServiceRequest, ServiceRequestStatus } from '@internal/shared';
 
 export default async function Page() {
-  let requests = [];
+  let requests: ServiceRequest[] = [];
   try {
     const res = await fetch('http://localhost:3000/service-requests', { cache: 'no-store' });
     if (res.ok) {
@@ -17,7 +18,10 @@ export default async function Page() {
       
       <section className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
         <h2 className="text-xl mb-4 font-semibold text-gray-800">Submit a Request</h2>
-        <form action={createServiceRequest} className="space-y-4">
+        <form action={async (formData: FormData) => {
+          'use server';
+          await createServiceRequest(formData);
+        }} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
             <input name="title" required className="border border-gray-300 p-2 w-full rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="E.g., Need access to Jira" />
@@ -42,7 +46,7 @@ export default async function Page() {
           <p className="text-gray-500 italic">No requests found.</p>
         ) : (
           <div className="space-y-4">
-            {requests.map((req: any) => (
+            {requests.map((req: ServiceRequest) => (
               <div key={req.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex justify-between items-center">
                 <div>
                   <p className="font-semibold text-gray-900">{req.title}</p>
@@ -59,7 +63,8 @@ export default async function Page() {
                 </div>
                 <form action={async () => {
                   'use server';
-                  const nextStatus = req.status === 'Submitted' ? 'In Progress' : 'Resolved';
+                  const nextStatus: ServiceRequestStatus =
+                    req.status === 'Submitted' ? 'In Progress' : 'Resolved';
                   await updateServiceRequestStatus(req.id, nextStatus);
                 }}>
                   {req.status === 'Submitted' && (

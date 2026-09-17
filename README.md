@@ -23,9 +23,11 @@ Ensure the following are installed before running the project:
 
 ## **Getting Started**
 
+Follow these steps exactly. No prior setup is assumed beyond Node.js.
+
 ### **1. Install Dependencies**
 
-From the repository root (this bootstraps all workspaces including `apps/backend` and `apps/frontend`):
+From the repository root (bootstraps `apps/backend`, `apps/frontend`, `packages/shared`):
 
 ```bash
 npm install
@@ -33,16 +35,25 @@ npm install
 
 ### **2. Initialize the Database**
 
-Navigate to the backend workspace and push the Prisma schema to create the SQLite database:
+From the backend workspace, generate the client and create the SQLite file:
 
 ```bash
 cd apps/backend
+npx prisma generate
 npx prisma db push
+cd ../..
 ```
 
-This creates `apps/backend/prisma/dev.db` with the `ServiceRequest` table. For subsequent schema changes, use:
+This creates `apps/backend/prisma/dev.db` with the `ServiceRequest` table. Verify:
 
 ```bash
+npx prisma --workspace=@internal/backend db push
+```
+
+For subsequent schema changes, use:
+
+```bash
+cd apps/backend
 npx prisma migrate dev --name <migration_name>
 ```
 
@@ -61,7 +72,12 @@ cd apps/backend
 npm run start:dev
 ```
 
-The NestJS API will be available at **`http://localhost:3000`**.
+The NestJS API will be available at **`http://localhost:3000`**. Health check:
+
+```bash
+curl http://localhost:3000/service-requests
+```
+*Expected: `200 OK` with `[]` or a JSON array.*
 
 ### **4. Start the Frontend**
 
@@ -74,7 +90,53 @@ npm run dev -- -p 3001
 
 The Next.js dashboard will be available at **`http://localhost:3001`**.
 
-### **5. Run the Test Suite**
+Exercise the flow in the UI:
+1. Open `http://localhost:3001`, submit Title `Need access to Jira`, Category `IT` -> appears as `Submitted`.
+2. Click **Start Work** -> becomes `In Progress` (Server Action sends `PATCH` with `x-user-role: operator`).
+3. Click **Resolve** -> becomes `Resolved`.
+
+### **5. Exercise the Flow via curl (same contract as the UI)**
+
+```bash
+# Create (201, status Submitted)
+curl -X POST http://localhost:3000/service-requests \
+ -H "Content-Type: application/json" \
+ -d '{"title": "Need new laptop", "category": "IT"}'
+# Save the returned "id" as ID below.
+
+# List
+curl http://localhost:3000/service-requests
+
+# Get one
+curl http://localhost:3000/service-requests/<ID>
+
+# Allowed: Submitted -> In Progress with operator role (200)
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
+ -H "Content-Type: application/json" \
+ -H "x-user-role: operator" \
+ -d '{"status": "In Progress"}'
+
+# Denied: same request without role (403)
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
+ -H "Content-Type: application/json" \
+ -d '{"status": "Resolved"}'
+
+# Valid: In Progress -> Resolved (200)
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
+ -H "Content-Type: application/json" \
+ -H "x-user-role: operator" \
+ -d '{"status": "Resolved"}'
+
+# Expected failure: bad ID (404)
+curl http://localhost:3000/service-requests/non-existent-id
+
+# Invalid: bad payload (400)
+curl -X POST http://localhost:3000/service-requests \
+ -H "Content-Type: application/json" \
+ -d '{"title": "", "category": "IT"}'
+```
+
+### **6. Run the Test Suite**
 
 **Unit & business-rule tests** (Jest):
 
@@ -83,7 +145,7 @@ cd apps/backend
 npm test
 ```
 
-**E2E / integration tests** (Jest + Supertest against real SQLite):
+**E2E / integration tests** (Jest + Supertest against real SQLite, includes auth 403, invalid 400, missing 404, immutable 422, full POST -> PATCH -> GET lifecycle):
 
 ```bash
 cd apps/backend
@@ -95,6 +157,8 @@ npm run test:e2e
 ```bash
 npm run test:backend
 ```
+
+All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md` for the exact passing output.
 
 ---
 
@@ -109,16 +173,17 @@ npm run test:backend
 │   │   │   └── dev.db                  # SQLite database (auto-generated)
 │   │   ├── src/
 │   │   │   ├── prisma/                 # PrismaService & PrismaModule
-│   │   │   ├── service-requests/       # Controller, Service, DTOs, Entities
+│   │   │   ├── service-requests/       # Controller, Service, AuthGuard, DTOs, Entities
 │   │   │   ├── app.module.ts           # Root NestJS module
-│   │   │   └── main.ts                 # Application entry point (port 3000)
-│   │   └── test/                       # E2E / integration tests
+│   │   │   └── main.ts                 # Entry point (port 3000, CORS + ValidationPipe)
+│   │   └── test/                       # E2E / integration tests (12 tests)
 │   └── frontend/                       # Next.js App Router (React + Tailwind CSS)
 │       └── src/app/
-│           ├── page.tsx                # Dashboard UI (submit form + request list)
-│           └── actions.ts              # Server Actions (POST/PATCH to backend)
+│           ├── page.tsx                # Dashboard UI (typed with @internal/shared)
+│           └── actions.ts              # Server Actions (POST/PATCH + x-user-role)
 ├── packages/
-│   └── shared/                         # Shared DTOs, Enums, and Types
+│   └── shared/                         # Explicit API contract (statuses, DTOs, transitions, roles)
+│       └── src/index.ts
 ├── docs/                               # Project documentation
 └── package.json                        # NPM Workspaces root
 ```
@@ -148,21 +213,10 @@ npm run test:backend
 
 ## **v0.2 Milestone: State Machine Verification**
 
-The v0.2 milestone implements the foundational NestJS application and the state machine for the service-requests lifecycle. Use the following curl commands to verify the 4 core invariants.
-
-### **Setup & Startup**
-1. Install dependencies from the root (this will bootstrap all workspaces):
-   ```bash
-   npm install
-   ```
-2. Start the development server for the backend workspace:
-   ```bash
-   npm run start:backend
-   ```
-   The API will be available at `http://localhost:3000`.
+Use the backend from **Getting Started step 3** (`http://localhost:3000`). IDs below are UUIDs returned by `POST` — replace `<ID>` with a real ID.
 
 ### **Testing the State Machine**
-Verify the 4 core state machine invariants using the following curl commands.
+Verify the core invariants using the following curl commands (all `PATCH` calls require `x-user-role: operator` or `admin`, otherwise `403`).
 
 #### **1. Create Request (Initializes as `Submitted`)**
 ```bash
@@ -174,16 +228,18 @@ curl -X POST http://localhost:3000/service-requests \
 
 #### **2. Valid Transition: `Submitted` -> `In Progress`**
 ```bash
-curl -X PATCH http://localhost:3000/service-requests/1/status \
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
 -H "Content-Type: application/json" \
+-H "x-user-role: operator" \
 -d '{"status": "In Progress"}'
 ```
 *Expected Output: `200 OK` with `{"status": "In Progress", ...}`*
 
 #### **3. Valid Transition: `In Progress` -> `Resolved`**
 ```bash
-curl -X PATCH http://localhost:3000/service-requests/1/status \
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
 -H "Content-Type: application/json" \
+-H "x-user-role: operator" \
 -d '{"status": "Resolved"}'
 ```
 *Expected Output: `200 OK` with `{"status": "Resolved", ...}`*
@@ -191,8 +247,9 @@ curl -X PATCH http://localhost:3000/service-requests/1/status \
 #### **4. Invalid Transition: Mutating Immutable State (Fails)**
 Once a request is `Resolved`, it cannot be updated.
 ```bash
-curl -X PATCH http://localhost:3000/service-requests/1/status \
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
 -H "Content-Type: application/json" \
+-H "x-user-role: operator" \
 -d '{"status": "In Progress"}'
 ```
 *Expected Output: `422 Unprocessable Entity` with message "Request is immutable and cannot be updated"*
@@ -200,14 +257,29 @@ curl -X PATCH http://localhost:3000/service-requests/1/status \
 #### **Bonus: Invalid Transition: Skipping States (Fails)**
 You cannot transition directly from `Submitted` to `Resolved`.
 ```bash
-# Create a new request (ID: 2)
+# Create a new request, save its ID as NEW_ID
 curl -X POST http://localhost:3000/service-requests \
 -H "Content-Type: application/json" \
 -d '{"title": "Software License", "category": "IT"}'
 
 # Attempt illegal skip
-curl -X PATCH http://localhost:3000/service-requests/2/status \
+curl -X PATCH http://localhost:3000/service-requests/<NEW_ID>/status \
 -H "Content-Type: application/json" \
+-H "x-user-role: operator" \
 -d '{"status": "Resolved"}'
 ```
 *Expected Output: `400 Bad Request` with message "Invalid state transition"*
+
+#### **Authorization: Allowed vs Denied**
+```bash
+# Denied: no role header -> 403 Forbidden
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
+-H "Content-Type: application/json" \
+-d '{"status": "In Progress"}'
+
+# Allowed: operator role -> 200 OK
+curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
+-H "Content-Type: application/json" \
+-H "x-user-role: operator" \
+-d '{"status": "In Progress"}'
+```

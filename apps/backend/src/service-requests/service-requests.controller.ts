@@ -1,7 +1,8 @@
-﻿import { Controller, Post, Body, Param, Patch, Get } from '@nestjs/common';
+﻿import { Controller, Post, Body, Param, Patch, Get, UseGuards } from '@nestjs/common';
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { AuthGuard } from './auth.guard';
 
 @Controller('service-requests')
 export class ServiceRequestsController {
@@ -23,6 +24,7 @@ export class ServiceRequestsController {
   }
 
   @Patch(':id/status')
+  @UseGuards(AuthGuard)
   async updateStatus(
     @Param('id') id: string,
     @Body() updateServiceRequestStatusDto: UpdateServiceRequestStatusDto
