@@ -4,27 +4,139 @@ A centralized internal request intake and management platform designed to elimin
 
 ## **Project Overview**
 
-This repository represents the **v0.1 Product Foundation** for the Internal Request Management System. It establishes the core product specification, operational architecture, relational data model, and architectural decision record (ADR).
+This repository represents the **Internal Request Management System**, progressing from a v0.1 product foundation through a full-stack vertical slice. It establishes the core product specification, operational architecture, relational data model, architectural decision record (ADR), and a working end-to-end implementation with a Next.js frontend, NestJS backend, and SQLite database via Prisma ORM.
+
+---
+
+## **Prerequisites**
+
+Ensure the following are installed before running the project:
+
+| Tool | Version | Purpose |
+| :--- | :------ | :------ |
+| **Node.js** | >= 20.x | JavaScript runtime |
+| **npm** | >= 10.x | Package manager (ships with Node.js) |
+| **SQLite** | 3.x | Embedded database (used automatically via Prisma — no separate install needed) |
+| **Prisma CLI** | >= 6.x | Installed as a dev dependency; no global install required |
+
+---
+
+## **Getting Started**
+
+### **1. Install Dependencies**
+
+From the repository root (this bootstraps all workspaces including `apps/backend` and `apps/frontend`):
+
+```bash
+npm install
+```
+
+### **2. Initialize the Database**
+
+Navigate to the backend workspace and push the Prisma schema to create the SQLite database:
+
+```bash
+cd apps/backend
+npx prisma db push
+```
+
+This creates `apps/backend/prisma/dev.db` with the `ServiceRequest` table. For subsequent schema changes, use:
+
+```bash
+npx prisma migrate dev --name <migration_name>
+```
+
+### **3. Start the Backend**
+
+From the repository root:
+
+```bash
+npm run start:backend
+```
+
+Or directly from the backend workspace:
+
+```bash
+cd apps/backend
+npm run start:dev
+```
+
+The NestJS API will be available at **`http://localhost:3000`**.
+
+### **4. Start the Frontend**
+
+In a separate terminal, from the frontend workspace:
+
+```bash
+cd apps/frontend
+npm run dev -- -p 3001
+```
+
+The Next.js dashboard will be available at **`http://localhost:3001`**.
+
+### **5. Run the Test Suite**
+
+**Unit & business-rule tests** (Jest):
+
+```bash
+cd apps/backend
+npm test
+```
+
+**E2E / integration tests** (Jest + Supertest against real SQLite):
+
+```bash
+cd apps/backend
+npm run test:e2e
+```
+
+**Run everything from the repo root:**
+
+```bash
+npm run test:backend
+```
+
+---
 
 ## **Repository Structure**
 
 ```text
 .
 ├── apps/
-│   ├── backend/              # NestJS Core API (v0.2 Foundation)
-│   └── frontend/             # Future React/NextJS application
+│   ├── backend/                        # NestJS Core API
+│   │   ├── prisma/
+│   │   │   ├── schema.prisma           # Prisma schema (ServiceRequest model)
+│   │   │   └── dev.db                  # SQLite database (auto-generated)
+│   │   ├── src/
+│   │   │   ├── prisma/                 # PrismaService & PrismaModule
+│   │   │   ├── service-requests/       # Controller, Service, DTOs, Entities
+│   │   │   ├── app.module.ts           # Root NestJS module
+│   │   │   └── main.ts                 # Application entry point (port 3000)
+│   │   └── test/                       # E2E / integration tests
+│   └── frontend/                       # Next.js App Router (React + Tailwind CSS)
+│       └── src/app/
+│           ├── page.tsx                # Dashboard UI (submit form + request list)
+│           └── actions.ts              # Server Actions (POST/PATCH to backend)
 ├── packages/
-│   └── shared/               # Shared DTOs, Enums, and Types
-├── docs/                     # Project documentation
-└── package.json              # NPM Workspaces Root
+│   └── shared/                         # Shared DTOs, Enums, and Types
+├── docs/                               # Project documentation
+└── package.json                        # NPM Workspaces root
 ```
 
-## **Documentation Overview**
+---
 
-> * [**Product Specification (product-spec.md)**](http://docs.google.com/docs/product-spec.md)**:** Defines the intake pillars, dynamic forms, impact-based priority scoring, and deterministic state transitions (Submitted → Pending Approval → In Progress → Blocked → Resolved / Declined).  
-> * [**System Architecture (architecture.md)**](http://docs.google.com/docs/architecture.md)**:** Outlines system boundaries, role-based access control (RBAC), decoupled notification handlers, and operational resilience mechanisms.  
-> * [**Data Model (data-model.md)**](http://docs.google.com/docs/data-model.md)**:** Details domain entities (Users, Requests, Approvals, Audit Logs), relationship cardinalities, lifecycle invariants, relational PostgreSQL storage choices, and index optimizations for queue queries.  
-> * [**Architecture Decision Record (ADR-001.md)**](http://docs.google.com/docs/decisions/ADR-001.md)**:** Documents the architectural tradeoff between state overwriting, append-only event sourcing, and our selected dual-storage strategy for complete request auditability.
+## **Documentation Index**
+
+| Document | Description |
+| :------- | :---------- |
+| [**product-spec.md**](docs/product-spec.md) | Defines intake pillars, dynamic forms, impact-based priority scoring, and deterministic state transitions (`Submitted` → `Pending Approval` → `In Progress` → `Blocked` → `Resolved` / `Declined`). |
+| [**architecture.md**](docs/architecture.md) | Outlines system boundaries, role-based access control (RBAC), decoupled notification handlers, and operational resilience mechanisms. |
+| [**data-model.md**](docs/data-model.md) | Details domain entities (Users, Requests, Approvals, Audit Logs), relationship cardinalities, lifecycle invariants, relational storage choices, and index optimizations for queue queries. |
+| [**decisions/ADR-001.md**](docs/decisions/ADR-001.md) | Documents the architectural tradeoff between state overwriting, append-only event sourcing, and the selected dual-storage strategy for complete request auditability. |
+| [**week2-agentic-workflow.md**](docs/week2-agentic-workflow.md) | Week 2 deliverable: bounded lifecycle slice definition, NestJS technical mapping, and verification strategy. |
+| [**week3-full-stack-delivery.md**](docs/week3-full-stack-delivery.md) | Week 3 deliverable: completed full-stack flow description, enforced boundaries, automated confidence suite, and passing test output. |
+
+---
 
 ## **Evaluation Criteria Alignment (v0.1 Foundation)**
 
@@ -32,9 +144,11 @@ This repository represents the **v0.1 Product Foundation** for the Internal Requ
 > * **Data Model Reasoning:** Relational storage is justified through strict transactional constraints on state machine transitions.  
 > * **Traceability:** Every design choice is traceable from product spec requirements to architecture and data schemas.
 
-## **v0.2 Milestone: Quick Start & Verification**
+---
 
-The v0.2 milestone implements the foundational NestJS application and an in-memory state machine for the service-requests lifecycle. 
+## **v0.2 Milestone: State Machine Verification**
+
+The v0.2 milestone implements the foundational NestJS application and the state machine for the service-requests lifecycle. Use the following curl commands to verify the 4 core invariants.
 
 ### **Setup & Startup**
 1. Install dependencies from the root (this will bootstrap all workspaces):

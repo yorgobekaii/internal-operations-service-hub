@@ -1,65 +1,72 @@
-import { Injectable, BadRequestException, UnprocessableEntityException, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, BadRequestException, UnprocessableEntityException, NotFoundException } from '@nestjs/common';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
-import { ServiceRequest, ServiceRequestStatus } from './entities/service-request.entity';
+import { PrismaService } from '../prisma/prisma.service';
+import { ServiceRequest } from '@prisma/client';
 
 @Injectable()
 export class ServiceRequestsService {
-  private readonly requests = new Map<string, ServiceRequest>();
-  private idCounter = 1;
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createDto: CreateServiceRequestDto): ServiceRequest {
-    const id = this.idCounter.toString();
-    this.idCounter++;
-    
-    const newRequest: ServiceRequest = {
-      id,
-      title: createDto.title,
-      category: createDto.category,
-      status: 'Submitted',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    
-    this.requests.set(id, newRequest);
-    return newRequest;
+  async create(createDto: CreateServiceRequestDto): Promise<ServiceRequest> {
+    return this.prisma.serviceRequest.create({
+      data: {
+        title: createDto.title,
+        category: createDto.category,
+        status: 'Submitted',
+      },
+    });
   }
 
-  findOne(id: string): ServiceRequest {
-    const request = this.requests.get(id);
+  async findAll(): Promise<ServiceRequest[]> {
+    return this.prisma.serviceRequest.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findOne(id: string): Promise<ServiceRequest> {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+    });
+    
     if (!request) {
       throw new NotFoundException(`ServiceRequest with ID ${id} not found`);
     }
     return request;
   }
 
-  updateStatus(id: string, updateDto: UpdateServiceRequestStatusDto): ServiceRequest {
-    const request = this.findOne(id);
+  async updateStatus(id: string, updateDto: UpdateServiceRequestStatusDto): Promise<ServiceRequest> {
+    const request = await this.findOne(id);
     const currentStatus = request.status;
     const nextStatus = updateDto.status;
 
-    // Immutability Invariant: Cannot update a Resolved request
-    if (currentStatus === 'Resolved') {
+    if (currentStatus === 'Resolved' || currentStatus === 'Declined') {
       throw new UnprocessableEntityException('Request is immutable and cannot be updated');
     }
 
-    // State Machine Transitions
     if (currentStatus === 'Submitted') {
       if (nextStatus !== 'In Progress') {
-        throw new BadRequestException('Invalid state transition. Can only transition from Submitted to In Progress.');
+        throw new BadRequestException('Invalid state transition.');
       }
     } else if (currentStatus === 'In Progress') {
-      if (nextStatus !== 'Resolved') {
-        throw new BadRequestException('Invalid state transition. Can only transition from In Progress to Resolved.');
+      if (nextStatus !== 'Resolved' && nextStatus !== 'Blocked' && nextStatus !== 'Declined') {
+        throw new BadRequestException('Invalid state transition.');
+      }
+    } else if (currentStatus === 'Blocked') {
+      if (nextStatus !== 'In Progress' && nextStatus !== 'Declined') {
+        throw new BadRequestException('Invalid state transition.');
+      }
+    } else if (currentStatus === 'Pending Approval') {
+      if (nextStatus !== 'In Progress' && nextStatus !== 'Declined') {
+         throw new BadRequestException('Invalid state transition.');
       }
     } else {
-      throw new BadRequestException(`Unknown state transition from ${currentStatus} to ${nextStatus}`);
+      throw new BadRequestException('Unknown state transition');
     }
 
-    request.status = nextStatus;
-    request.updatedAt = new Date();
-    
-    this.requests.set(id, request);
-    return request;
+    return this.prisma.serviceRequest.update({
+      where: { id },
+      data: { status: nextStatus },
+    });
   }
 }

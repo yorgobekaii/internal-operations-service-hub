@@ -1,5 +1,4 @@
-export class CreateServiceRequestDto {
+﻿export class CreateServiceRequestDto {
   title: string;
   category: string;
 }
-
