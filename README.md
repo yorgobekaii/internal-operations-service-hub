@@ -6,6 +6,9 @@ A centralized internal request intake and management platform designed to elimin
 
 This repository represents the **Internal Request Management System**, progressing from a v0.1 product foundation through a full-stack vertical slice. It establishes the core product specification, operational architecture, relational data model, architectural decision record (ADR), and a working end-to-end implementation with a Next.js frontend, NestJS backend, and SQLite database via Prisma ORM.
 
+> * **Coherence:** All specification, architectural, and data modeling choices directly map back to internal intake requirements.  
+> * **Data Model Reasoning:** Relational storage is justified through strict transactional constraints on state machine transitions.  
+> * **Traceability:** Every design choice is traceable from product spec requirements to architecture and data schemas.
 ---
 
 ## **Prerequisites**
@@ -202,9 +205,3 @@ All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md
 | [**week3-full-stack-delivery.md**](docs/week3-full-stack-delivery.md) | Week 3 deliverable: completed full-stack flow description, enforced boundaries, automated confidence suite, and passing test output. |
 
 ---
-
-## **Evaluation Criteria Alignment (v0.1 Foundation)**
-
-> * **Coherence:** All specification, architectural, and data modeling choices directly map back to internal intake requirements.  
-> * **Data Model Reasoning:** Relational storage is justified through strict transactional constraints on state machine transitions.  
-> * **Traceability:** Every design choice is traceable from product spec requirements to architecture and data schemas.
