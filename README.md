@@ -6,6 +6,10 @@ A centralized internal request intake and management platform designed to elimin
 
 This repository represents the **Internal Request Management System**, progressing from a v0.1 product foundation through a full-stack vertical slice. It establishes the core product specification, operational architecture, relational data model, architectural decision record (ADR), and a working end-to-end implementation with a Next.js frontend, NestJS backend, and SQLite database via Prisma ORM.
 
+> * **Coherence:** All specification, architectural, and data modeling choices directly map back to internal intake requirements.  
+> * **Data Model Reasoning:** Relational storage is justified through strict transactional constraints on state machine transitions.  
+> * **Traceability:** Every design choice is traceable from product spec requirements to architecture and data schemas.
+
 ---
 
 ## **Prerequisites**
@@ -23,56 +27,46 @@ Ensure the following are installed before running the project:
 
 ## **Getting Started**
 
-Follow these steps exactly. No prior setup is assumed beyond Node.js.
+From the repository root, run these three commands. No prior setup is assumed beyond Node.js:
+
+```bash
+npm install
+npm run setup
+npm run start:backend
+```
 
 ### **1. Install Dependencies**
-
-From the repository root (bootstraps `apps/backend`, `apps/frontend`, `packages/shared`):
 
 ```bash
 npm install
 ```
 
-### **2. Initialize the Database**
-
-From the backend workspace, generate the client and create the SQLite file:
+### **2. Setup (build shared contract + create database)**
 
 ```bash
-cd apps/backend
-npx prisma generate
-npx prisma db push
-cd ../..
+npm run setup
 ```
 
-This creates `apps/backend/prisma/dev.db` with the `ServiceRequest` table. Verify:
+This builds `packages/shared` to plain JavaScript and creates `apps/backend/prisma/dev.db` with the `ServiceRequest` table. It runs:
 
 ```bash
-npx prisma --workspace=@internal/backend db push
+npm run build --workspace=@internal/shared
+npm run prisma:push --workspace=@internal/backend
 ```
 
 For subsequent schema changes, use:
 
 ```bash
-cd apps/backend
-npx prisma migrate dev --name <migration_name>
+npm run prisma:push --workspace=@internal/backend
 ```
 
 ### **3. Start the Backend**
-
-From the repository root:
 
 ```bash
 npm run start:backend
 ```
 
-Or directly from the backend workspace:
-
-```bash
-cd apps/backend
-npm run start:dev
-```
-
-The NestJS API will be available at **`http://localhost:3000`**. Health check:
+The NestJS API will be available at **`http://localhost:3000`**. (`start:backend` rebuilds the shared contract automatically, so step 2 only needs to run once.) Health check:
 
 ```bash
 curl http://localhost:3000/service-requests
@@ -138,24 +132,16 @@ curl -X POST http://localhost:3000/service-requests \
 
 ### **6. Run the Test Suite**
 
-**Unit & business-rule tests** (Jest):
-
-```bash
-cd apps/backend
-npm test
-```
-
-**E2E / integration tests** (Jest + Supertest against real SQLite, includes auth 403, invalid 400, missing 404, immutable 422, full POST -> PATCH -> GET lifecycle):
-
-```bash
-cd apps/backend
-npm run test:e2e
-```
-
-**Run everything from the repo root:**
+**Unit & business-rule tests** (Jest, 4 tests):
 
 ```bash
 npm run test:backend
+```
+
+**E2E / integration tests** (Jest + Supertest against real SQLite, 12 tests — includes auth 403, invalid 400, missing 404, immutable 422, full POST -> PATCH -> GET lifecycle):
+
+```bash
+npm run test:backend:e2e
 ```
 
 All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md` for the exact passing output.
@@ -183,7 +169,8 @@ All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md
 │           └── actions.ts              # Server Actions (POST/PATCH + x-user-role)
 ├── packages/
 │   └── shared/                         # Explicit API contract (statuses, DTOs, transitions, roles)
-│       └── src/index.ts
+│       ├── src/index.ts                # Source (run `npm run build:shared` to compile)
+│       └── dist/                       # Compiled output (generated, git-ignored)
 ├── docs/                               # Project documentation
 └── package.json                        # NPM Workspaces root
 ```
@@ -202,9 +189,3 @@ All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md
 | [**week3-full-stack-delivery.md**](docs/week3-full-stack-delivery.md) | Week 3 deliverable: completed full-stack flow description, enforced boundaries, automated confidence suite, and passing test output. |
 
 ---
-
-## **Evaluation Criteria Alignment (v0.1 Foundation)**
-
-> * **Coherence:** All specification, architectural, and data modeling choices directly map back to internal intake requirements.  
-> * **Data Model Reasoning:** Relational storage is justified through strict transactional constraints on state machine transitions.  
-> * **Traceability:** Every design choice is traceable from product spec requirements to architecture and data schemas.
