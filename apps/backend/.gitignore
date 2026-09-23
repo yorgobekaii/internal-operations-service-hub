@@ -1,5 +1,10 @@
 node_modules
 # Keep environment variables out of version control
 .env
+.env.test.local
+
+# Isolated e2e database (never commit test artefacts)
+prisma/test.db
+prisma/test.db-journal
 
 /src/generated/prisma

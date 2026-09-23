@@ -1,10 +1,54 @@
 ﻿import { createServiceRequest, updateServiceRequestStatus } from './actions';
-import type { ServiceRequest, ServiceRequestStatus } from '@internal/shared';
+import {
+  SERVICE_REQUEST_ROUTES,
+  type ServiceRequest,
+  type ServiceRequestStatus,
+} from '@internal/shared';
+
+export const dynamic = 'force-dynamic';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+function badgeClass(status: ServiceRequestStatus): string {
+  switch (status) {
+    case 'Submitted':
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'Pending Approval':
+      return 'bg-purple-50 text-purple-700 border-purple-200';
+    case 'In Progress':
+      return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+    case 'Blocked':
+      return 'bg-orange-50 text-orange-700 border-orange-200';
+    case 'Resolved':
+      return 'bg-green-50 text-green-700 border-green-200';
+    case 'Declined':
+      return 'bg-gray-100 text-gray-600 border-gray-300';
+    default:
+      return 'bg-gray-50 text-gray-600 border-gray-200';
+  }
+}
+
+function nextStatusFor(status: ServiceRequestStatus): ServiceRequestStatus | null {
+  switch (status) {
+    case 'Submitted':
+      return 'In Progress';
+    case 'Pending Approval':
+      return 'In Progress';
+    case 'In Progress':
+      return 'Resolved';
+    case 'Blocked':
+      return 'In Progress';
+    default:
+      return null;
+  }
+}
 
 export default async function Page() {
   let requests: ServiceRequest[] = [];
   try {
-    const res = await fetch('http://localhost:3000/service-requests', { cache: 'no-store' });
+    const res = await fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.base}`, {
+      cache: 'no-store',
+    });
     if (res.ok) {
       requests = await res.json();
     }
@@ -52,32 +96,38 @@ export default async function Page() {
                   <p className="font-semibold text-gray-900">{req.title}</p>
                   <p className="text-sm text-gray-500 mt-1">
                     <span className="inline-block bg-gray-100 px-2 py-0.5 rounded text-xs mr-2 border">{req.category}</span>
-                    <span className={`inline-block px-2 py-0.5 rounded text-xs border ${
-                      req.status === 'Submitted' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
-                      req.status === 'In Progress' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 
-                      'bg-green-50 text-green-700 border-green-200'
-                    }`}>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs border ${badgeClass(req.status)}`}>
                       {req.status}
                     </span>
                   </p>
                 </div>
                 <form action={async () => {
                   'use server';
-                  const nextStatus: ServiceRequestStatus =
-                    req.status === 'Submitted' ? 'In Progress' : 'Resolved';
-                  await updateServiceRequestStatus(req.id, nextStatus);
+                  const next = nextStatusFor(req.status);
+                  if (next) {
+                    await updateServiceRequestStatus(req.id, next);
+                  }
                 }}>
                   {req.status === 'Submitted' && (
                     <button type="submit" className="bg-yellow-500 hover:bg-yellow-600 text-white font-medium px-3 py-1.5 rounded text-sm transition-colors shadow-sm">Start Work</button>
                   )}
+                  {req.status === 'Pending Approval' && (
+                    <button type="submit" className="bg-purple-600 hover:bg-purple-700 text-white font-medium px-3 py-1.5 rounded text-sm transition-colors shadow-sm">Approve</button>
+                  )}
                   {req.status === 'In Progress' && (
                     <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-medium px-3 py-1.5 rounded text-sm transition-colors shadow-sm">Resolve</button>
+                  )}
+                  {req.status === 'Blocked' && (
+                    <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-medium px-3 py-1.5 rounded text-sm transition-colors shadow-sm">Resume</button>
                   )}
                   {req.status === 'Resolved' && (
                     <span className="text-green-600 font-bold px-3 py-1.5 text-sm flex items-center">
                       <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
                       Completed
                     </span>
+                  )}
+                  {req.status === 'Declined' && (
+                    <span className="text-gray-500 font-medium px-3 py-1.5 text-sm">Declined</span>
                   )}
                 </form>
               </div>

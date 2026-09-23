@@ -8,9 +8,12 @@
   ],
   "scripts": {
     "setup": "npm run build --workspace=@internal/shared && npm run prisma:push --workspace=@internal/backend",
+    "build": "npm run build --workspace=@internal/shared && npm run build --workspace=@internal/backend",
     "build:shared": "npm run build --workspace=@internal/shared",
     "start:backend": "npm run build --workspace=@internal/shared && npm run start:dev --workspace=@internal/backend",
+    "start:frontend": "npm run dev --workspace=frontend -- -p 3001",
     "build:backend": "npm run build --workspace=@internal/shared && npm run build --workspace=@internal/backend",
+    "test": "npm run test:backend && npm run test:backend:e2e",
     "test:backend": "npm run build --workspace=@internal/shared && npm run test --workspace=@internal/backend",
     "test:backend:e2e": "npm run build --workspace=@internal/shared && npm run test:e2e --workspace=@internal/backend"
   }

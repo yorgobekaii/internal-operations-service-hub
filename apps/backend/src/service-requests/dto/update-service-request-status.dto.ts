@@ -9,5 +9,5 @@ export class UpdateServiceRequestStatusDto implements UpdateStatusContract {
   @IsString()
   @IsNotEmpty()
   @IsIn(SERVICE_REQUEST_STATUSES)
-  status: ServiceRequestStatus;
+  status!: ServiceRequestStatus;
 }

@@ -2,14 +2,16 @@
 
 import { revalidatePath } from 'next/cache';
 import {
+  OPERATOR_ROLES,
   SERVICE_REQUEST_ROUTES,
   USER_ROLE_HEADER,
+  type OperatorRole,
   type ServiceRequestStatus,
 } from '@internal/shared';
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 const API_URL = `${API_BASE}${SERVICE_REQUEST_ROUTES.base}`;
-const OPERATOR_ROLE = 'operator';
+const OPERATOR_ROLE: OperatorRole = OPERATOR_ROLES[0];
 
 export async function createServiceRequest(formData: FormData) {
   const title = formData.get('title') as string;

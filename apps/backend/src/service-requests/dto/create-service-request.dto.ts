@@ -1,12 +1,17 @@
-﻿import { IsNotEmpty, IsString } from 'class-validator';
-import type { CreateServiceRequestDto as CreateServiceRequestContract } from '@internal/shared';
+﻿import { IsIn, IsNotEmpty, IsString } from 'class-validator';
+import {
+  SERVICE_REQUEST_CATEGORIES,
+  type CreateServiceRequestDto as CreateServiceRequestContract,
+  type ServiceRequestCategory,
+} from '@internal/shared';
 
 export class CreateServiceRequestDto implements CreateServiceRequestContract {
   @IsString()
   @IsNotEmpty()
-  title: string;
+  title!: string;
 
   @IsString()
   @IsNotEmpty()
-  category: string;
+  @IsIn(SERVICE_REQUEST_CATEGORIES)
+  category!: ServiceRequestCategory;
 }

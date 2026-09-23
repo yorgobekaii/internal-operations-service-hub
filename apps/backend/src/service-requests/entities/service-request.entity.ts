@@ -1,13 +1,15 @@
-import type { ServiceRequestStatus as SharedStatus } from '@internal/shared';
+import type {
+  ServiceRequestStatus as SharedStatus,
+  ServiceRequestCategory as SharedCategory,
+} from '@internal/shared';
 
 export type ServiceRequestStatus = SharedStatus;
 
 export class ServiceRequest {
-  id: string;
-  title: string;
-  category: string;
-  status: ServiceRequestStatus;
-  createdAt: Date;
-  updatedAt: Date;
+  id!: string;
+  title!: string;
+  category!: SharedCategory;
+  status!: ServiceRequestStatus;
+  createdAt!: Date;
+  updatedAt!: Date;
 }
-

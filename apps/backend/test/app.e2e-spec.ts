@@ -4,13 +4,24 @@ import * as request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { USER_ROLE_HEADER } from '@internal/shared';
+import {
+  TEST_DATABASE_URL,
+  cleanupTestDatabase,
+  ensureTestDatabase,
+} from './test-database';
 
-describe('AppController (e2e)', () => {
+// Belt-and-braces: guarantee isolation even if jest setupFiles is bypassed.
+process.env.DATABASE_URL = TEST_DATABASE_URL;
+
+describe('AppController (e2e) [isolated test.db]', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   const createdIds: string[] = [];
 
   beforeAll(async () => {
+    // Automated pre-test migration: create/migrate prisma/test.db (never dev.db).
+    ensureTestDatabase();
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -25,14 +36,21 @@ describe('AppController (e2e)', () => {
     );
     await app.init();
     prisma = app.get(PrismaService);
+    // Start clean inside the isolated DB.
+    await prisma.serviceRequest.deleteMany({});
   }, 60000);
 
   afterAll(async () => {
     if (createdIds.length > 0) {
-      await prisma.serviceRequest.deleteMany({
-        where: { id: { in: createdIds } },
-      });
+      try {
+        await prisma.serviceRequest.deleteMany({
+          where: { id: { in: createdIds } },
+        });
+      } catch {
+        // App may already be torn down in failure paths.
+      }
     }
+    await cleanupTestDatabase(prisma);
     await app.close();
   });
 
@@ -70,7 +88,8 @@ describe('AppController (e2e)', () => {
       .send({ status: 'In Progress' })
       .expect(200)
       .expect((res) => {
-        if (res.body.status !== 'In Progress') throw new Error('Expected In Progress');
+        if (res.body.status !== 'In Progress')
+          throw new Error('Expected In Progress');
       });
 
     await request(app.getHttpServer())
@@ -79,7 +98,8 @@ describe('AppController (e2e)', () => {
       .send({ status: 'Resolved' })
       .expect(200)
       .expect((res) => {
-        if (res.body.status !== 'Resolved') throw new Error('Expected Resolved');
+        if (res.body.status !== 'Resolved')
+          throw new Error('Expected Resolved');
       });
 
     const getRes = await request(app.getHttpServer())
@@ -174,6 +194,62 @@ describe('AppController (e2e)', () => {
       .patch(`/service-requests/${id}/status`)
       .set(USER_ROLE_HEADER, 'operator')
       .send({ status: 'Resolved' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(422);
+  });
+
+  it('Invalid request: POST with unknown category returns 400', async () => {
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'Bad category', category: 'Flying' })
+      .expect(400);
+  });
+
+  it('Approval gating: Submitted -> Pending Approval -> In Progress succeeds', async () => {
+    const postRes = await createRequest('E2E Approval Gate', 'Finance');
+    const id = postRes.body.id;
+    expect(postRes.body.status).toBe('Submitted');
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Pending Approval' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.status !== 'Pending Approval')
+          throw new Error('Expected Pending Approval');
+      });
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'admin')
+      .send({ status: 'In Progress' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.status !== 'In Progress')
+          throw new Error('Expected In Progress');
+      });
+  });
+
+  it('Immutable: PATCH on Declined request returns 422', async () => {
+    const postRes = await createRequest('E2E Declined Immutable', 'IT');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Declined' })
       .expect(200);
 
     await request(app.getHttpServer())

@@ -10,7 +10,7 @@ export type ServiceRequestCategory = 'IT' | 'HR' | 'Finance' | 'Operations';
 
 export interface CreateServiceRequestDto {
   title: string;
-  category: string;
+  category: ServiceRequestCategory;
 }
 
 export interface UpdateServiceRequestStatusDto {
@@ -20,7 +20,7 @@ export interface UpdateServiceRequestStatusDto {
 export interface ServiceRequest {
   id: string;
   title: string;
-  category: string;
+  category: ServiceRequestCategory;
   status: ServiceRequestStatus;
   createdAt: string | Date;
   updatedAt: string | Date;
@@ -47,8 +47,13 @@ export const SERVICE_REQUEST_STATUSES: ServiceRequestStatus[] = [
   'Declined',
 ];
 
-export const ALLOWED_TRANSITIONS: Record<string, ServiceRequestStatus[]> = {
-  Submitted: ['In Progress'],
+export const ALLOWED_TRANSITIONS: Record<
+  ServiceRequestStatus,
+  ServiceRequestStatus[]
+> = {
+  // Reconciled with docs/product-spec.md + docs/data-model.md transition matrix:
+  // Submitted may route to approval gating, auto-start, or decline on validation failure.
+  Submitted: ['In Progress', 'Pending Approval', 'Declined'],
   'In Progress': ['Resolved', 'Blocked', 'Declined'],
   Blocked: ['In Progress', 'Declined'],
   'Pending Approval': ['In Progress', 'Declined'],

@@ -54,11 +54,13 @@ npm run build --workspace=@internal/shared
 npm run prisma:push --workspace=@internal/backend
 ```
 
-For subsequent schema changes, use:
+`prisma:push` is a workspace wrapper around `prisma db push` (equivalent to running `npx prisma db push` inside `apps/backend`). The datasource URL comes from `apps/backend/.env` (`DATABASE_URL="file:./dev.db"` — copy `apps/backend/.env.example` to `apps/backend/.env` on a fresh clone). For subsequent schema changes, use:
 
 ```bash
 npm run prisma:push --workspace=@internal/backend
 ```
+
+> **DB isolation:** E2E tests NEVER touch `dev.db`. They auto-create/migrate `apps/backend/prisma/test.db` (`DATABASE_URL=file:./test.db`, see `apps/backend/test/setup-e2e.ts` + `apps/backend/test/test-database.ts` + `apps/backend/.env.test`). Running the e2e suite leaves `dev.db` byte-identical (verified by hash before/after).
 
 ### **3. Start the Backend**
 
@@ -75,12 +77,13 @@ curl http://localhost:3000/service-requests
 
 ### **4. Start the Frontend**
 
-In a separate terminal, from the frontend workspace:
+In a separate terminal, from the repository root:
 
 ```bash
-cd apps/frontend
-npm run dev -- -p 3001
+npm run start:frontend
 ```
+
+(equivalent to `cd apps/frontend` + `npm run dev -- -p 3001`). The backend URL is read from `NEXT_PUBLIC_API_URL` with fallback `http://localhost:3000`, so no extra config is needed locally.
 
 The Next.js dashboard will be available at **`http://localhost:3001`**.
 
@@ -91,46 +94,55 @@ Exercise the flow in the UI:
 
 ### **5. Exercise the Flow via curl (same contract as the UI)**
 
+Replace `ID` with the `id` returned by the create call. Each command below is a single line (copy-paste safe in Windows PowerShell, `cmd`, and `bash` — no `\` continuations).
+
 ```bash
 # Create (201, status Submitted)
-curl -X POST http://localhost:3000/service-requests \
- -H "Content-Type: application/json" \
- -d '{"title": "Need new laptop", "category": "IT"}'
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\"}"
 # Save the returned "id" as ID below.
 
 # List
 curl http://localhost:3000/service-requests
 
 # Get one
-curl http://localhost:3000/service-requests/<ID>
+curl http://localhost:3000/service-requests/ID
 
 # Allowed: Submitted -> In Progress with operator role (200)
-curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
- -H "Content-Type: application/json" \
- -H "x-user-role: operator" \
- -d '{"status": "In Progress"}'
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"In Progress\"}"
+
+# Allowed: Submitted -> Pending Approval with operator role (200, approval gating per product-spec)
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"Pending Approval\"}"
 
 # Denied: same request without role (403)
-curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
- -H "Content-Type: application/json" \
- -d '{"status": "Resolved"}'
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -d "{\"status\": \"Resolved\"}"
 
 # Valid: In Progress -> Resolved (200)
-curl -X PATCH http://localhost:3000/service-requests/<ID>/status \
- -H "Content-Type: application/json" \
- -H "x-user-role: operator" \
- -d '{"status": "Resolved"}'
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"Resolved\"}"
 
 # Expected failure: bad ID (404)
 curl http://localhost:3000/service-requests/non-existent-id
 
 # Invalid: bad payload (400)
-curl -X POST http://localhost:3000/service-requests \
- -H "Content-Type: application/json" \
- -d '{"title": "", "category": "IT"}'
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"\", \"category\": \"IT\"}"
+
+# Invalid: unknown category (400, enforced by @IsIn)
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Bad category\", \"category\": \"Flying\"}"
+
+# Immutable: PATCH on Resolved or Declined (422)
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"In Progress\"}"
 ```
 
+PowerShell tip: the examples above use backslash-escaped quotes (`\"`) so they work verbatim in both PowerShell and `bash`. In `bash` you may instead use single-quoted bodies, e.g. `-d '{"title": "Need new laptop", "category": "IT"}'`.
+
 ### **6. Run the Test Suite**
+
+Full suite from the repository root (unit + isolated e2e, must be green):
+
+```bash
+npm test
+```
+
+(`npm test` = `npm run test:backend && npm run test:backend:e2e`.)
 
 **Unit & business-rule tests** (Jest, 4 tests):
 
@@ -138,13 +150,13 @@ curl -X POST http://localhost:3000/service-requests \
 npm run test:backend
 ```
 
-**E2E / integration tests** (Jest + Supertest against real SQLite, 12 tests — includes auth 403, invalid 400, missing 404, immutable 422, full POST -> PATCH -> GET lifecycle):
+**E2E / integration tests** (Jest + Supertest against a real, isolated SQLite `test.db`, 15 tests — includes auth 403, invalid 400 incl. unknown category, missing 404, immutable 422 for both `Resolved` and `Declined`, approval-gating `Submitted -> Pending Approval -> In Progress`, full POST -> PATCH -> GET lifecycle):
 
 ```bash
 npm run test:backend:e2e
 ```
 
-All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md` for the exact passing output.
+All 19 tests (4 unit + 15 e2e) must pass. See `docs/week3-full-stack-delivery.md` for the exact passing output.
 
 ---
 
@@ -155,24 +167,28 @@ All 16 tests (4 unit + 12 e2e) must pass. See `docs/week3-full-stack-delivery.md
 ├── apps/
 │   ├── backend/                        # NestJS Core API
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma           # Prisma schema (ServiceRequest model)
-│   │   │   └── dev.db                  # SQLite database (auto-generated)
+│   │   │   ├── schema.prisma           # Prisma schema (ServiceRequest model, env-driven DATABASE_URL)
+│   │   │   ├── dev.db                  # SQLite dev database (auto-generated, tracked)
+│   │   │   └── test.db                 # SQLite isolated e2e database (auto-generated, git-ignored)
 │   │   ├── src/
 │   │   │   ├── prisma/                 # PrismaService & PrismaModule
 │   │   │   ├── service-requests/       # Controller, Service, AuthGuard, DTOs, Entities
 │   │   │   ├── app.module.ts           # Root NestJS module
 │   │   │   └── main.ts                 # Entry point (port 3000, CORS + ValidationPipe)
-│   │   └── test/                       # E2E / integration tests (12 tests)
+│   │   └── test/                       # E2E / integration tests (15 tests, isolated test.db)
+│   │       ├── app.e2e-spec.ts         # Integration + lifecycle + boundary cases
+│   │       ├── test-database.ts        # ensureTestDatabase / cleanupTestDatabase helper
+│   │       └── setup-e2e.ts            # Jest setupFiles: forces DATABASE_URL=test.db
 │   └── frontend/                       # Next.js App Router (React + Tailwind CSS)
 │       └── src/app/
-│           ├── page.tsx                # Dashboard UI (typed with @internal/shared)
+│           ├── page.tsx                # Dashboard UI (typed with @internal/shared, force-dynamic)
 │           └── actions.ts              # Server Actions (POST/PATCH + x-user-role)
 ├── packages/
 │   └── shared/                         # Explicit API contract (statuses, DTOs, transitions, roles)
 │       ├── src/index.ts                # Source (run `npm run build:shared` to compile)
 │       └── dist/                       # Compiled output (generated, git-ignored)
 ├── docs/                               # Project documentation
-└── package.json                        # NPM Workspaces root
+└── package.json                        # NPM Workspaces root (test, build, start:frontend scripts)
 ```
 
 ---
