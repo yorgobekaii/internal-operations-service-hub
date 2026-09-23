@@ -258,4 +258,31 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .send({ status: 'In Progress' })
       .expect(422);
   });
+
+  it('AI triage: POST /ai-triage suggests IT advisory (200, no DB write)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/service-requests/ai-triage')
+      .send({ description: "My laptop screen is flickering and won't turn on" })
+      .expect(200);
+    expect(res.body.category).toBe('IT');
+    expect(res.body.title).toBeDefined();
+    expect(res.body.priority).toBeDefined();
+    expect(res.body.modelVersion).toBeDefined();
+  });
+
+  it('AI triage: POST /ai-triage with empty description returns 400', async () => {
+    await request(app.getHttpServer())
+      .post('/service-requests/ai-triage')
+      .send({ description: '' })
+      .expect(400);
+  });
+
+  it('Priority persists: POST with priority High returns High', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'E2E Priority', category: 'Finance', priority: 'High' })
+      .expect(201);
+    createdIds.push(res.body.id);
+    expect(res.body.priority).toBe('High');
+  });
 });

@@ -12,6 +12,7 @@ function buildRow(
     title: 'Laptop',
     category: 'IT',
     status: 'Submitted',
+    priority: 'Standard',
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

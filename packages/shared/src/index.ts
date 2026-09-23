@@ -11,6 +11,7 @@ export type ServiceRequestCategory = 'IT' | 'HR' | 'Finance' | 'Operations';
 export interface CreateServiceRequestDto {
   title: string;
   category: ServiceRequestCategory;
+  priority?: ServiceRequestPriority;
 }
 
 export interface UpdateServiceRequestStatusDto {
@@ -22,9 +23,12 @@ export interface ServiceRequest {
   title: string;
   category: ServiceRequestCategory;
   status: ServiceRequestStatus;
+  priority: ServiceRequestPriority;
   createdAt: string | Date;
   updatedAt: string | Date;
 }
+
+export type ServiceRequestPriority = 'Urgent' | 'High' | 'Standard' | 'Low';
 
 export const USER_ROLE_HEADER = 'x-user-role';
 
@@ -47,6 +51,27 @@ export const SERVICE_REQUEST_STATUSES: ServiceRequestStatus[] = [
   'Declined',
 ];
 
+export const SERVICE_REQUEST_PRIORITIES: ServiceRequestPriority[] = [
+  'Urgent',
+  'High',
+  'Standard',
+  'Low',
+];
+
+export interface AiTriageRequest {
+  description: string;
+}
+
+export interface AiTriageSuggestion {
+  category: ServiceRequestCategory;
+  title: string;
+  priority: ServiceRequestPriority;
+  summary: string;
+  confidence: number;
+  needsHumanReview: boolean;
+  modelVersion: string;
+}
+
 export const ALLOWED_TRANSITIONS: Record<
   ServiceRequestStatus,
   ServiceRequestStatus[]
@@ -65,4 +90,5 @@ export const SERVICE_REQUEST_ROUTES = {
   base: '/service-requests',
   byId: (id: string) => `/service-requests/${id}`,
   statusById: (id: string) => `/service-requests/${id}/status`,
+  aiTriage: '/service-requests/ai-triage',
 } as const;

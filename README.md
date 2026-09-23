@@ -85,21 +85,28 @@ npm run start:frontend
 
 (equivalent to `cd apps/frontend` + `npm run dev -- -p 3001`). The backend URL is read from `NEXT_PUBLIC_API_URL` with fallback `http://localhost:3000`, so no extra config is needed locally.
 
-The Next.js dashboard will be available at **`http://localhost:3001`**.
+The Next.js hub will be available at **`http://localhost:3001`** with three routes: `/` executive dashboard, `/new` intake, `/approvals` approval queue.
 
 Exercise the flow in the UI:
-1. Open `http://localhost:3001`, submit Title `Need access to Jira`, Category `IT` -> appears as `Submitted`.
-2. Click **Start Work** -> becomes `In Progress` (Server Action sends `PATCH` with `x-user-role: operator`).
-3. Click **Resolve** -> becomes `Resolved`.
+1. Open `http://localhost:3001`, use **AI Intake Assistant**: type `My laptop screen is flickering and won't turn on` -> **Suggest with AI** -> preview `IT / High` -> **Apply & Create Request**.
+2. Or file manually on `/new` (Title `Need access to Jira`, Category `IT`, Priority `Standard`) -> appears as `Submitted`.
+3. Filter the live queue by category/status/search; click **Start Work** -> `In Progress` (Server Action sends `PATCH` with `x-user-role: operator`); click **Resolve** -> `Resolved`. Pending items are also actionable on `/approvals`.
 
 ### **5. Exercise the Flow via curl (same contract as the UI)**
 
 Replace `ID` with the `id` returned by the create call. Each command below is a single line (copy-paste safe in Windows PowerShell, `cmd`, and `bash` — no `\` continuations).
 
 ```bash
-# Create (201, status Submitted)
+# Create (201, status Submitted, default priority Standard)
 curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\"}"
+# Create with explicit priority (201)
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\", \"priority\": \"High\"}"
 # Save the returned "id" as ID below.
+
+# AI triage suggest (200, advisory only — never writes to DB)
+curl -X POST http://localhost:3000/service-requests/ai-triage -H "Content-Type: application/json" -d "{\"description\": \"My laptop screen is flickering and won't turn on\"}"
+# AI triage thin input (400)
+curl -X POST http://localhost:3000/service-requests/ai-triage -H "Content-Type: application/json" -d "{\"description\": \"\"}"
 
 # List
 curl http://localhost:3000/service-requests
@@ -158,6 +165,25 @@ npm run test:backend:e2e
 
 All 19 tests (4 unit + 15 e2e) must pass. See `docs/week3-full-stack-delivery.md` for the exact passing output.
 
+**AI evals (Week 4, 8 cases, mock provider — no key needed):**
+
+```bash
+npm run eval:triage
+```
+
+(`eval:triage` = `build shared && jest --config ./test/jest-eval.json` — E1 clear IT/HR, E3 thin, E4 ambiguous, E5 Finance high-cost rule, E6 invalid model coercion, E7 provider 502, E8 malformed confidence. All 8 must pass. See `docs/week4-production-ai.md`.)
+
+**Groq (real LLM, optional):** default `AI_PROVIDER=mock` needs no key. For live Groq suggestions, copy `apps/backend/.env.example` (documents `GROQ_API_KEY` + `GROQ_MODEL=llama-3.3-70b-versatile`, key from https://console.groq.com/keys) and run:
+
+```bash
+# PowerShell
+$env:AI_PROVIDER="groq"; $env:GROQ_API_KEY="gsk_..."; npm run start:backend
+# bash
+AI_PROVIDER=groq GROQ_API_KEY="gsk_..." npm run start:backend
+```
+
+Without `GROQ_API_KEY`, `POST /service-requests/ai-triage` under `AI_PROVIDER=groq` returns stable `502` (proven by E7).
+
 ---
 
 ## **Repository Structure**
@@ -203,5 +229,6 @@ All 19 tests (4 unit + 15 e2e) must pass. See `docs/week3-full-stack-delivery.md
 | [**decisions/ADR-001.md**](docs/decisions/ADR-001.md) | Documents the architectural tradeoff between state overwriting, append-only event sourcing, and the selected dual-storage strategy for complete request auditability. |
 | [**week2-agentic-workflow.md**](docs/week2-agentic-workflow.md) | Week 2 deliverable: bounded lifecycle slice definition, NestJS technical mapping, and verification strategy. |
 | [**week3-full-stack-delivery.md**](docs/week3-full-stack-delivery.md) | Week 3 deliverable: completed full-stack flow description, enforced boundaries, automated confidence suite, and passing test output. |
+| [**week4-production-ai.md**](docs/week4-production-ai.md) | Week 4 deliverable: advisory Groq AI triage, priority persistence, context control, 8-case eval suite, and passing logs. |
 
 ---

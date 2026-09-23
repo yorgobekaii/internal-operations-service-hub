@@ -15,7 +15,9 @@
     "build:backend": "npm run build --workspace=@internal/shared && npm run build --workspace=@internal/backend",
     "test": "npm run test:backend && npm run test:backend:e2e",
     "test:backend": "npm run build --workspace=@internal/shared && npm run test --workspace=@internal/backend",
-    "test:backend:e2e": "npm run build --workspace=@internal/shared && npm run test:e2e --workspace=@internal/backend"
+    "test:backend:e2e": "npm run build --workspace=@internal/shared && npm run test:e2e --workspace=@internal/backend",
+    "eval:triage": "npm run build --workspace=@internal/shared && npm run test:eval --workspace=@internal/backend",
+    "eval": "npm run eval:triage"
   }
 }
 

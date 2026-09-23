@@ -12,6 +12,7 @@ model ServiceRequest {
   title     String
   category  String
   status    String   @default("Submitted")
+  priority  String   @default("Standard")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

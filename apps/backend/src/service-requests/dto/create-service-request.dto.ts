@@ -1,8 +1,10 @@
-﻿import { IsIn, IsNotEmpty, IsString } from 'class-validator';
+﻿import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import {
   SERVICE_REQUEST_CATEGORIES,
+  SERVICE_REQUEST_PRIORITIES,
   type CreateServiceRequestDto as CreateServiceRequestContract,
   type ServiceRequestCategory,
+  type ServiceRequestPriority,
 } from '@internal/shared';
 
 export class CreateServiceRequestDto implements CreateServiceRequestContract {
@@ -14,4 +16,9 @@ export class CreateServiceRequestDto implements CreateServiceRequestContract {
   @IsNotEmpty()
   @IsIn(SERVICE_REQUEST_CATEGORIES)
   category!: ServiceRequestCategory;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(SERVICE_REQUEST_PRIORITIES)
+  priority?: ServiceRequestPriority;
 }

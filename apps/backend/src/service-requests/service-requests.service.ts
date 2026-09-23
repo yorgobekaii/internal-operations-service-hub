@@ -11,16 +11,26 @@ import type { ServiceRequest as PrismaServiceRequest } from '@prisma/client';
 import type {
   ServiceRequest as SharedServiceRequest,
   ServiceRequestCategory,
+  ServiceRequestPriority,
   ServiceRequestStatus,
 } from '@internal/shared';
-import { ALLOWED_TRANSITIONS } from '@internal/shared';
+import {
+  ALLOWED_TRANSITIONS,
+  SERVICE_REQUEST_PRIORITIES,
+} from '@internal/shared';
 
 function toContract(row: PrismaServiceRequest): SharedServiceRequest {
+  const priority = (SERVICE_REQUEST_PRIORITIES as string[]).includes(
+    row.priority,
+  )
+    ? (row.priority as ServiceRequestPriority)
+    : 'Standard';
   return {
     id: row.id,
     title: row.title,
     category: row.category as ServiceRequestCategory,
     status: row.status as ServiceRequestStatus,
+    priority,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -38,6 +48,7 @@ export class ServiceRequestsService {
         title: createDto.title,
         category: createDto.category,
         status: 'Submitted',
+        priority: createDto.priority ?? 'Standard',
       },
     });
     return toContract(row);
