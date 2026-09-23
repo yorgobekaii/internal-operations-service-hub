@@ -157,17 +157,24 @@ export class GroqTriageClient implements AiTriageClient {
   private readonly timeoutMs: number;
 
   constructor(opts?: { apiKey?: string; model?: string; timeoutMs?: number }) {
-    this.apiKey = opts?.apiKey ?? process.env.GROQ_API_KEY ?? '';
-    this.model =
-      opts?.model ?? process.env.GROQ_MODEL ?? GROQ_DEFAULT_MODEL;
+    const rawKey = opts?.apiKey ?? process.env.GROQ_API_KEY ?? '';
+    const rawModel = opts?.model ?? process.env.GROQ_MODEL ?? GROQ_DEFAULT_MODEL;
+    this.apiKey = cleanEnv(rawKey);
+    const cleanedModel = cleanEnv(rawModel) || GROQ_DEFAULT_MODEL;
+    this.model = cleanedModel;
     this.timeoutMs = opts?.timeoutMs ?? 8000;
     this.modelVersion = `groq:${this.model}`;
   }
 
   async suggest(redactedDescription: string): Promise<RawTriageCandidate> {
-    if (!this.apiKey) {
+    if (!this.apiKey || isPlaceholderSecret(this.apiKey)) {
       throw new AiProviderError(
-        'GROQ_API_KEY is not configured (AI_PROVIDER=groq requires it)',
+        'GROQ_API_KEY is not configured (AI_PROVIDER=groq requires a real key in apps/backend/.env or shell env — see README)',
+      );
+    }
+    if (isPlaceholderSecret(this.model)) {
+      throw new AiProviderError(
+        `GROQ_MODEL is a placeholder ("${this.model}"). Set a real model e.g. "${GROQ_DEFAULT_MODEL}"`,
       );
     }
     const controller = new AbortController();
@@ -195,7 +202,13 @@ export class GroqTriageClient implements AiTriageClient {
         }),
       });
       if (!res.ok) {
-        throw new AiProviderError(`Groq provider error: HTTP ${res.status}`);
+        let detail = '';
+        try {
+          detail = ` — ${(await res.text()).slice(0, 160)}`;
+        } catch {
+          detail = '';
+        }
+        throw new AiProviderError(`Groq provider error: HTTP ${res.status}${detail}`);
       }
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
@@ -232,10 +245,36 @@ export class GroqTriageClient implements AiTriageClient {
 
 /** Factory: AI_PROVIDER=groq selects Groq, anything else uses the mock. */
 export function createTriageClient(): AiTriageClient {
-  if ((process.env.AI_PROVIDER ?? 'mock').toLowerCase() === 'groq') {
+  if (cleanEnv(process.env.AI_PROVIDER ?? 'mock').toLowerCase() === 'groq') {
     return new GroqTriageClient();
   }
   return new MockLocalTriageClient();
+}
+
+/**
+ * Normalize env values: trim whitespace, strip one layer of surrounding
+ * single/double quotes (common when copying from docs or .env editors).
+ */
+export function cleanEnv(value: string): string {
+  return value
+    .trim()
+    .replace(/^["'](.*)["']$/, '$1')
+    .trim();
+}
+
+/** Placeholder-looking values users sometimes paste instead of real secrets. */
+const PLACEHOLDER_VALUES = new Set([
+  '',
+  'value',
+  'changeme',
+  'your-key-here',
+  'your_groq_api_key_here',
+  'xxx',
+  'test',
+]);
+
+export function isPlaceholderSecret(value: string): boolean {
+  return PLACEHOLDER_VALUES.has(cleanEnv(value).toLowerCase());
 }
 
 /** Validate + coerce a full suggestion (used by service and tests). */

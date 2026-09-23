@@ -173,16 +173,25 @@ npm run eval:triage
 
 (`eval:triage` = `build shared && jest --config ./test/jest-eval.json` — E1 clear IT/HR, E3 thin, E4 ambiguous, E5 Finance high-cost rule, E6 invalid model coercion, E7 provider 502, E8 malformed confidence. All 8 must pass. See `docs/week4-production-ai.md`.)
 
-**Groq (real LLM, optional):** default `AI_PROVIDER=mock` needs no key. For live Groq suggestions, copy `apps/backend/.env.example` (documents `GROQ_API_KEY` + `GROQ_MODEL=llama-3.3-70b-versatile`, key from https://console.groq.com/keys) and run:
+**Groq (real LLM, optional):** default `AI_PROVIDER=mock` needs no key. Yes — the right procedure is putting values in `apps/backend/.env` (the backend loads that file automatically on boot, no export needed):
 
 ```bash
-# PowerShell
-$env:AI_PROVIDER="groq"; $env:GROQ_API_KEY="gsk_..."; npm run start:backend
-# bash
-AI_PROVIDER=groq GROQ_API_KEY="gsk_..." npm run start:backend
+# Inside apps/backend: copy once, then edit .env with real values
+Copy-Item .env.example .env   # PowerShell
+# cp .env.example .env        # bash
 ```
 
-Without `GROQ_API_KEY`, `POST /service-requests/ai-triage` under `AI_PROVIDER=groq` returns stable `502` (proven by E7).
+Then in `apps/backend/.env` set real values (quotes optional) and **restart** the backend:
+
+```
+AI_PROVIDER="groq"
+GROQ_API_KEY="gsk_..."              # real key from https://console.groq.com/keys — "value" will NOT work
+GROQ_MODEL="llama-3.3-70b-versatile" # real model id — "value" will NOT work (Groq 404 → backend 502)
+```
+
+Check the backend terminal on boot: it logs `[ai-triage] provider=groq:llama-3.3-70b-versatile` (live) vs `[ai-triage] provider=mock-local-v1` (mock). Shell exports still work for one-offs and override `.env`, but do NOT export `AI_PROVIDER=groq` globally — tests force mock regardless, but keep shells clean.
+
+Without a real `GROQ_API_KEY`, `POST /service-requests/ai-triage` under `AI_PROVIDER=groq` returns stable `502` (proven by E7), and the UI shows the backend reason.
 
 ---
 

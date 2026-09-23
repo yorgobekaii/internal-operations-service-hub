@@ -64,10 +64,22 @@ export async function suggestTriage(
       cache: 'no-store',
     });
     if (!res.ok) {
+      let detail = '';
+      try {
+        const body = (await res.json()) as { message?: string | string[] };
+        const msg = Array.isArray(body.message)
+          ? body.message.join('; ')
+          : body.message;
+        if (msg) detail = ` (${msg.slice(0, 160)})`;
+      } catch {
+        detail = '';
+      }
       if (res.status === 400) return { error: 'Please add a little more detail.' };
       if (res.status === 502)
-        return { error: 'AI assistant is unavailable right now — fill the form manually.' };
-      return { error: 'AI assistant failed — fill the form manually.' };
+        return {
+          error: `AI assistant is unavailable right now${detail} — fill the form manually.`,
+        };
+      return { error: `AI assistant failed${detail} — fill the form manually.` };
     }
     const suggestion = (await res.json()) as AiTriageSuggestion;
     return { suggestion };

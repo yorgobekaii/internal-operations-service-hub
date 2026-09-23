@@ -12,7 +12,13 @@ import { PrismaModule } from '../prisma/prisma.module';
     ServiceRequestsService,
     {
       provide: AiTriageService,
-      useFactory: () => new AiTriageService(createTriageClient()),
+      useFactory: () => {
+        const client = createTriageClient();
+        console.log(
+          `[ai-triage] provider=${client.modelVersion} (AI_PROVIDER=${process.env.AI_PROVIDER ?? 'mock (default)'})`,
+        );
+        return new AiTriageService(client);
+      },
     },
   ],
 })

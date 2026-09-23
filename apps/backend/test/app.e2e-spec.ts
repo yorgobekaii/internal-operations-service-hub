@@ -12,6 +12,7 @@ import {
 
 // Belt-and-braces: guarantee isolation even if jest setupFiles is bypassed.
 process.env.DATABASE_URL = TEST_DATABASE_URL;
+process.env.AI_PROVIDER = 'mock';
 
 describe('AppController (e2e) [isolated test.db]', () => {
   let app: INestApplication;
