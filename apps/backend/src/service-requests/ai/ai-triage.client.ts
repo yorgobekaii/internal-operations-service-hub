@@ -131,7 +131,7 @@ export class MockLocalTriageClient implements AiTriageClient {
   }
 }
 
-const GROQ_DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 function buildGroqPrompt(description: string): string {
@@ -147,7 +147,9 @@ function buildGroqPrompt(description: string): string {
 
 /**
  * Real Groq provider (OpenAI-compatible chat completions).
- * Requires GROQ_API_KEY. Model via GROQ_MODEL (default llama-3.3-70b-versatile).
+ * Requires GROQ_API_KEY. Model via GROQ_MODEL (default openai/gpt-oss-120b).
+ * NOTE: llama-3.3-70b-versatile / llama-3.1-8b-instant were decommissioned by
+ * Groq (Aug 2026) and now answer 404 — do not use them as GROQ_MODEL.
  * Any network/parse failure surfaces as AiProviderError -> HTTP 502 upstream.
  */
 export class GroqTriageClient implements AiTriageClient {
@@ -189,7 +191,6 @@ export class GroqTriageClient implements AiTriageClient {
         },
         body: JSON.stringify({
           model: this.model,
-          temperature: 0,
           max_tokens: 400,
           messages: [
             {

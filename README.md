@@ -186,10 +186,10 @@ Then in `apps/backend/.env` set real values (quotes optional) and **restart** th
 ```
 AI_PROVIDER="groq"
 GROQ_API_KEY="gsk_..."              # real key from https://console.groq.com/keys — "value" will NOT work
-GROQ_MODEL="llama-3.3-70b-versatile" # real model id — "value" will NOT work (Groq 404 → backend 502)
+GROQ_MODEL="openai/gpt-oss-120b"  # current model — llama-3.3-70b-versatile was retired by Groq (Aug 2026) and 404s
 ```
 
-Check the backend terminal on boot: it logs `[ai-triage] provider=groq:llama-3.3-70b-versatile` (live) vs `[ai-triage] provider=mock-local-v1` (mock). Shell exports still work for one-offs and override `.env`, but do NOT export `AI_PROVIDER=groq` globally — tests force mock regardless, but keep shells clean.
+Check the backend terminal on boot: it logs `[ai-triage] provider=groq:openai/gpt-oss-120b` (live) vs `[ai-triage] provider=mock-local-v1` (mock). Shell exports still work for one-offs and override `.env`, but do NOT export `AI_PROVIDER=groq` globally — tests force mock regardless, but keep shells clean.
 
 Without a real `GROQ_API_KEY`, `POST /service-requests/ai-triage` under `AI_PROVIDER=groq` returns stable `502` (proven by E7), and the UI shows the backend reason.
 

@@ -28,14 +28,14 @@ Default remains the deterministic mock so tests/evals never need a key.
 ```
 AI_PROVIDER="mock"   # mock (default) | groq
 GROQ_API_KEY=""      # required only for AI_PROVIDER=groq (https://console.groq.com/keys)
-GROQ_MODEL="llama-3.3-70b-versatile"
+GROQ_MODEL="openai/gpt-oss-120b"
 ```
 
 Correct procedure (yes — `apps/backend/.env` is the right file; the backend
 loads it automatically on boot since v0.4.1, no export needed):
 
 1. Inside `apps/backend`: `Copy-Item .env.example .env` (PowerShell) or `cp .env.example .env` (bash).
-2. Edit `.env` with REAL values (`KEY=value`, quotes optional): `AI_PROVIDER="groq"`, `GROQ_API_KEY="gsk_..."` (real key — the literal word `"value"` will NOT work), `GROQ_MODEL="llama-3.3-70b-versatile"` (real model id — `"value"` yields Groq 404 → backend 502).
+2. Edit `.env` with REAL values (`KEY=value`, quotes optional): `AI_PROVIDER="groq"`, `GROQ_API_KEY="gsk_..."` (real key — the literal word `"value"` will NOT work), `GROQ_MODEL="openai/gpt-oss-120b"` (current model — `"value"` yields Groq 404 → backend 502; note `llama-3.3-70b-versatile` / `llama-3.1-8b-instant` were retired by Groq in Aug 2026 and also 404).
 3. RESTART the backend. Boot log shows `[ai-triage] provider=groq:<model>` (live) vs `[ai-triage] provider=mock-local-v1` (mock).
 4. Do NOT export `AI_PROVIDER=groq` globally in test terminals. Tests (`setup-e2e.ts` + `app.e2e-spec.ts`) now force `AI_PROVIDER=mock` regardless of shell env, so a leaked export can no longer flip e2e to Groq (the exact failure mode seen in testing: `expected 200, got 502`).
 
