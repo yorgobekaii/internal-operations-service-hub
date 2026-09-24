@@ -8,11 +8,66 @@ datasource db {
 }
 
 model ServiceRequest {
+  id            String    @id @default(uuid())
+  title         String
+  category      String
+  status        String    @default("Submitted")
+  priority      String    @default("Standard")
+  description   String?
+  requesterId   String?
+  queueId       String?
+  ownerId       String?
+  backupOwnerId String?
+  blockedReason String?
+  slaDueAt      DateTime?
+  payloadJson   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([queueId, status])
+  @@index([requesterId, createdAt])
+  @@index([status, priority, createdAt])
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  role       String   @default("requester")
+  department String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Queue {
   id        String   @id @default(uuid())
-  title     String
-  category  String
-  status    String   @default("Submitted")
-  priority  String   @default("Standard")
+  name      String   @unique
+  category  String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ApprovalStep {
+  id         String    @id @default(uuid())
+  requestId  String
+  approverId String?
+  status     String    @default("pending")
+  rationale  String?
+  decidedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([requestId])
+  @@index([approverId, status])
+}
+
+model AuditEntry {
+  id        String   @id @default(uuid())
+  requestId String
+  actorId   String
+  from      String?
+  to        String?
+  action    String   @default("status_changed")
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
 }

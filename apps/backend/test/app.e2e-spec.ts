@@ -38,11 +38,19 @@ describe('AppController (e2e) [isolated test.db]', () => {
     await app.init();
     prisma = app.get(PrismaService);
     // Start clean inside the isolated DB.
+    await prisma.auditEntry.deleteMany({}).catch(() => undefined);
     await prisma.serviceRequest.deleteMany({});
   }, 60000);
 
   afterAll(async () => {
     if (createdIds.length > 0) {
+      try {
+        await prisma.auditEntry.deleteMany({
+          where: { requestId: { in: createdIds } },
+        });
+      } catch {
+        // Audit table missing or app torn down — nothing to clean.
+      }
       try {
         await prisma.serviceRequest.deleteMany({
           where: { id: { in: createdIds } },
@@ -285,5 +293,56 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .expect(201);
     createdIds.push(res.body.id);
     expect(res.body.priority).toBe('High');
+  });
+
+  it('Step A: POST creates an audit entry with actor + slaDueAt (backward compat 3-field payload)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'E2E Audit Create', category: 'IT' })
+      .expect(201);
+    createdIds.push(res.body.id);
+    expect(res.body.status).toBe('Submitted');
+    expect(res.body.slaDueAt).toBeDefined();
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${res.body.id}/audit`)
+      .expect(200);
+    expect(Array.isArray(audit.body)).toBe(true);
+    expect(audit.body).toHaveLength(1);
+    expect(audit.body[0]).toMatchObject({
+      requestId: res.body.id,
+      to: 'Submitted',
+      action: 'created',
+    });
+    expect(audit.body[0].actorId).toBeDefined();
+  });
+
+  it('Step A: PATCH appends a status_changed audit entry with header actor', async () => {
+    const postRes = await createRequest('E2E Audit Patch', 'HR');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200);
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/audit`)
+      .expect(200);
+    expect(audit.body).toHaveLength(2);
+    expect(audit.body[0]).toMatchObject({ action: 'created', to: 'Submitted' });
+    expect(audit.body[1]).toMatchObject({
+      from: 'Submitted',
+      to: 'In Progress',
+      action: 'status_changed',
+    });
+    expect(audit.body[1].actorId).toBe('operator');
+  });
+
+  it('Step A: GET audit for non-existent ID returns 404', async () => {
+    await request(app.getHttpServer())
+      .get('/service-requests/non-existent-id-12345/audit')
+      .expect(404);
   });
 });

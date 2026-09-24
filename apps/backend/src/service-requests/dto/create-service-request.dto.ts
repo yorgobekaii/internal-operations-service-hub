@@ -21,4 +21,24 @@ export class CreateServiceRequestDto implements CreateServiceRequestContract {
   @IsString()
   @IsIn(SERVICE_REQUEST_PRIORITIES)
   priority?: ServiceRequestPriority;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  requesterId?: string;
+
+  @IsOptional()
+  @IsString()
+  queueId?: string;
+
+  @IsOptional()
+  @IsString()
+  ownerId?: string;
+
+  @IsOptional()
+  @IsString()
+  payloadJson?: string;
 }

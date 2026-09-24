@@ -1,4 +1,4 @@
-﻿import { IsIn, IsNotEmpty, IsString } from 'class-validator';
+﻿import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import {
   SERVICE_REQUEST_STATUSES,
   type UpdateServiceRequestStatusDto as UpdateStatusContract,
@@ -10,4 +10,12 @@ export class UpdateServiceRequestStatusDto implements UpdateStatusContract {
   @IsNotEmpty()
   @IsIn(SERVICE_REQUEST_STATUSES)
   status!: ServiceRequestStatus;
+
+  @IsOptional()
+  @IsString()
+  blockedReason?: string;
+
+  @IsOptional()
+  @IsString()
+  actorId?: string;
 }

@@ -12,10 +12,27 @@ export interface CreateServiceRequestDto {
   title: string;
   category: ServiceRequestCategory;
   priority?: ServiceRequestPriority;
+  description?: string;
+  requesterId?: string;
+  queueId?: string;
+  ownerId?: string;
+  payloadJson?: string;
 }
 
 export interface UpdateServiceRequestStatusDto {
   status: ServiceRequestStatus;
+  blockedReason?: string;
+  actorId?: string;
+}
+
+export interface ApproveServiceRequestDto {
+  approverId?: string;
+  rationale?: string;
+}
+
+export interface RejectServiceRequestDto {
+  rationale: string;
+  approverId?: string;
 }
 
 export interface ServiceRequest {
@@ -24,13 +41,64 @@ export interface ServiceRequest {
   category: ServiceRequestCategory;
   status: ServiceRequestStatus;
   priority: ServiceRequestPriority;
+  description?: string | null;
+  requesterId?: string | null;
+  queueId?: string | null;
+  ownerId?: string | null;
+  backupOwnerId?: string | null;
+  blockedReason?: string | null;
+  slaDueAt?: string | Date | null;
+  payloadJson?: string | null;
   createdAt: string | Date;
   updatedAt: string | Date;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  role: string;
+  department?: string | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
+export interface Queue {
+  id: string;
+  name: string;
+  category: string;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
+export type ApprovalStepStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ApprovalStep {
+  id: string;
+  requestId: string;
+  approverId: string | null;
+  status: ApprovalStepStatus;
+  rationale: string | null;
+  decidedAt: string | Date | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
+export type AuditAction = 'created' | 'status_changed' | 'approved' | 'rejected';
+
+export interface AuditEntry {
+  id: string;
+  requestId: string;
+  actorId: string;
+  from: ServiceRequestStatus | null;
+  to: ServiceRequestStatus | null;
+  action: AuditAction | string;
+  createdAt: string | Date;
 }
 
 export type ServiceRequestPriority = 'Urgent' | 'High' | 'Standard' | 'Low';
 
 export const USER_ROLE_HEADER = 'x-user-role';
+export const USER_ID_HEADER = 'x-user-id';
 
 export const OPERATOR_ROLES = ['operator', 'admin'] as const;
 export type OperatorRole = (typeof OPERATOR_ROLES)[number];
@@ -90,5 +158,15 @@ export const SERVICE_REQUEST_ROUTES = {
   base: '/service-requests',
   byId: (id: string) => `/service-requests/${id}`,
   statusById: (id: string) => `/service-requests/${id}/status`,
+  auditById: (id: string) => `/service-requests/${id}/audit`,
   aiTriage: '/service-requests/ai-triage',
 } as const;
+
+export const SLA_HOURS: Record<ServiceRequestPriority, number> = {
+  Urgent: 4,
+  High: 24,
+  Standard: 72,
+  Low: 120,
+};
+
+export const REOPEN_DAYS = 7;

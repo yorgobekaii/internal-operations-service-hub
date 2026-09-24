@@ -43,6 +43,11 @@ export async function cleanupTestDatabase(
   prisma: PrismaService,
 ): Promise<void> {
   try {
+    await prisma.auditEntry.deleteMany({});
+  } catch {
+    // Table missing on old DBs — nothing to clean.
+  }
+  try {
     await prisma.serviceRequest.deleteMany({});
   } catch {
     // App already closed or table missing — nothing to clean.
