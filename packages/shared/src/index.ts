@@ -159,8 +159,12 @@ export const SERVICE_REQUEST_ROUTES = {
   byId: (id: string) => `/service-requests/${id}`,
   statusById: (id: string) => `/service-requests/${id}/status`,
   auditById: (id: string) => `/service-requests/${id}/audit`,
+  approveById: (id: string) => `/service-requests/${id}/approve`,
+  rejectById: (id: string) => `/service-requests/${id}/reject`,
   aiTriage: '/service-requests/ai-triage',
 } as const;
+
+export const APPROVALS_ROUTE = '/approvals';
 
 export const QUEUE_ROUTES = {
   base: '/queues',

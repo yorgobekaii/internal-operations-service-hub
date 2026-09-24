@@ -2,6 +2,10 @@
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import {
+  ApproveServiceRequestDto,
+  RejectServiceRequestDto,
+} from './dto/decision.dto';
 import { AiTriageRequestDto } from './dto/ai-triage-request.dto';
 import { AiTriageService } from './ai/ai-triage.service';
 import { AuthGuard, actorFromRequest } from './auth.guard';
@@ -115,6 +119,40 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.updateStatus(
       id,
       updateServiceRequestStatusDto,
+      resolveActor(headers ?? {}),
+      scope.userId ? scope : undefined,
+    );
+  }
+
+  @Post(':id/approve')
+  @UseGuards(AuthGuard)
+  async approve(
+    @Param('id') id: string,
+    @Body() dto: ApproveServiceRequestDto,
+    @Headers() headers: Record<string, unknown>,
+    @Req() req: unknown,
+  ) {
+    const scope = resolveScope(headers ?? {}, req);
+    return this.serviceRequestsService.approve(
+      id,
+      dto ?? {},
+      resolveActor(headers ?? {}),
+      scope.userId ? scope : undefined,
+    );
+  }
+
+  @Post(':id/reject')
+  @UseGuards(AuthGuard)
+  async reject(
+    @Param('id') id: string,
+    @Body() dto: RejectServiceRequestDto,
+    @Headers() headers: Record<string, unknown>,
+    @Req() req: unknown,
+  ) {
+    const scope = resolveScope(headers ?? {}, req);
+    return this.serviceRequestsService.reject(
+      id,
+      dto ?? {},
       resolveActor(headers ?? {}),
       scope.userId ? scope : undefined,
     );

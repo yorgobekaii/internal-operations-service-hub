@@ -7,6 +7,10 @@
 } from '@nestjs/common';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import {
+  ApproveServiceRequestDto,
+  RejectServiceRequestDto,
+} from './dto/decision.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueuesService } from '../queues/queues.service';
 import {
@@ -197,6 +201,17 @@ export class ServiceRequestsService {
       throw new BadRequestException('Invalid state transition.');
     }
 
+    // Approval invariant: gated requests cannot start fulfillment while
+    // any approval step is still pending. Release happens via approve().
+    if (currentStatus === 'Pending Approval' && nextStatus === 'In Progress') {
+      const open = await this.openApprovalSteps(id);
+      if (open.length > 0) {
+        throw new UnprocessableEntityException(
+          'Approval required before fulfillment can start',
+        );
+      }
+    }
+
     const data: Record<string, unknown> = { status: nextStatus };
     if (nextStatus === 'Blocked') {
       data['blockedReason'] = updateDto.blockedReason ?? null;
@@ -209,6 +224,29 @@ export class ServiceRequestsService {
         where: { id },
         data: data as never,
       });
+      // Entering the gate opens a pending approval step (unassigned: any
+      // operator/admin may decide until Step D introduces named approvers).
+      if (nextStatus === 'Pending Approval') {
+        const open = await tx.approvalStep.findMany({
+          where: { requestId: id, status: 'pending' },
+        });
+        if (open.length === 0) {
+          await tx.approvalStep.create({
+            data: { requestId: id, approverId: null, status: 'pending' },
+          });
+        }
+      }
+      // Aborting out of the gate closes open steps as rejected.
+      if (currentStatus === 'Pending Approval' && nextStatus === 'Declined') {
+        await tx.approvalStep.updateMany({
+          where: { requestId: id, status: 'pending' },
+          data: {
+            status: 'rejected',
+            approverId: updateDto.actorId ?? actorId,
+            decidedAt: new Date(),
+          },
+        });
+      }
       await tx.auditEntry.create({
         data: {
           requestId: id,
@@ -233,5 +271,137 @@ export class ServiceRequestsService {
       orderBy: { createdAt: 'asc' },
     });
     return rows.map(toAuditContract);
+  }
+
+  private async openApprovalSteps(requestId: string) {
+    return this.prisma.approvalStep.findMany({
+      where: { requestId, status: 'pending' },
+    });
+  }
+
+  async approve(
+    id: string,
+    dto: ApproveServiceRequestDto,
+    actorId = 'system',
+    actor?: RequestActor,
+  ): Promise<SharedServiceRequest> {
+    const request = await this.findOne(id, actor);
+    if (request.status !== 'Pending Approval') {
+      throw new BadRequestException(
+        'Only requests pending approval can be approved',
+      );
+    }
+    const open = await this.openApprovalSteps(id);
+    if (open.length === 0) {
+      throw new BadRequestException(
+        'No pending approval steps for this request',
+      );
+    }
+    const approver = dto.approverId ?? actor?.userId ?? actorId;
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.approvalStep.updateMany({
+        where: { requestId: id, status: 'pending' },
+        data: {
+          status: 'approved',
+          approverId: approver,
+          rationale: dto.rationale ?? null,
+          decidedAt: new Date(),
+        },
+      });
+      const updated = await tx.serviceRequest.update({
+        where: { id },
+        data: { status: 'In Progress' },
+      });
+      await tx.auditEntry.create({
+        data: {
+          requestId: id,
+          actorId: approver,
+          from: 'Pending Approval',
+          to: 'In Progress',
+          action: 'approved',
+        },
+      });
+      return updated;
+    });
+    return toContract(row);
+  }
+
+  async reject(
+    id: string,
+    dto: RejectServiceRequestDto,
+    actorId = 'system',
+    actor?: RequestActor,
+  ): Promise<SharedServiceRequest> {
+    if (!dto.rationale || dto.rationale.trim().length === 0) {
+      throw new BadRequestException('A rejection rationale is required.');
+    }
+    const request = await this.findOne(id, actor);
+    if (request.status !== 'Pending Approval') {
+      throw new BadRequestException(
+        'Only requests pending approval can be rejected',
+      );
+    }
+    const open = await this.openApprovalSteps(id);
+    if (open.length === 0) {
+      throw new BadRequestException(
+        'No pending approval steps for this request',
+      );
+    }
+    const approver = dto.approverId ?? actor?.userId ?? actorId;
+    const row = await this.prisma.$transaction(async (tx) => {
+      await tx.approvalStep.updateMany({
+        where: { requestId: id, status: 'pending' },
+        data: {
+          status: 'rejected',
+          approverId: approver,
+          rationale: dto.rationale.trim(),
+          decidedAt: new Date(),
+        },
+      });
+      const updated = await tx.serviceRequest.update({
+        where: { id },
+        data: { status: 'Declined' },
+      });
+      await tx.auditEntry.create({
+        data: {
+          requestId: id,
+          actorId: approver,
+          from: 'Pending Approval',
+          to: 'Declined',
+          action: 'rejected',
+        },
+      });
+      return updated;
+    });
+    return toContract(row);
+  }
+
+  async findApprovals(
+    actor?: RequestActor,
+    approverId?: string,
+  ): Promise<SharedServiceRequest[]> {
+    const scope = await this.resolveScope(actor);
+    const where: Record<string, unknown> = { status: 'Pending Approval' };
+    if (scope.mode === 'own') {
+      where['requesterId'] = scope.userId;
+    } else if (scope.mode === 'dept') {
+      where['queueId'] = { in: await this.deptQueueIds(scope.department) };
+    }
+    if (approverId) {
+      const steps = await this.prisma.approvalStep.findMany({
+        where: {
+          status: 'pending',
+          OR: [{ approverId }, { approverId: null }],
+        },
+      });
+      const ids = [...new Set(steps.map((s) => s.requestId))];
+      if (ids.length === 0) return [];
+      where['id'] = { in: ids };
+    }
+    const rows = await this.prisma.serviceRequest.findMany({
+      where: where as never,
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(toContract);
   }
 }

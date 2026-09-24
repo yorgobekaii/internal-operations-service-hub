@@ -131,4 +131,53 @@ export async function updateServiceRequestStatus(
   }
 }
 
+export async function approveServiceRequest(id: string) {
+  try {
+    const headers = await identityHeaders();
+    if (!headers[USER_ROLE_HEADER]) headers[USER_ROLE_HEADER] = OPERATOR_ROLE;
+    const res = await fetch(`${API_URL}/${id}/approve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      return { error: errorData.message || 'Failed to approve request' };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/approvals');
+    return { success: true };
+  } catch {
+    return { error: 'Failed to connect to backend' };
+  }
+}
+
+export async function rejectServiceRequest(id: string, rationale: string) {
+  if (!rationale || rationale.trim().length === 0) {
+    return { error: 'A rejection rationale is required.' };
+  }
+  try {
+    const headers = await identityHeaders();
+    if (!headers[USER_ROLE_HEADER]) headers[USER_ROLE_HEADER] = OPERATOR_ROLE;
+    const res = await fetch(`${API_URL}/${id}/reject`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ rationale: rationale.trim() }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      return { error: errorData.message || 'Failed to reject request' };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/approvals');
+    return { success: true };
+  } catch {
+    return { error: 'Failed to connect to backend' };
+  }
+}
+
 export type { ServiceRequestPriority };

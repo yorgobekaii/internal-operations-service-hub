@@ -1,7 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { updateServiceRequestStatus } from '../actions';
+import {
+  approveServiceRequest,
+  rejectServiceRequest,
+  updateServiceRequestStatus,
+} from '../actions';
 import {
   categoryBadge,
   nextStatusFor,
@@ -61,7 +65,28 @@ export default function DashboardClient({
     if (!next) return;
     setBusyId(id);
     try {
-      await updateServiceRequestStatus(id, next);
+      const res = await updateServiceRequestStatus(id, next);
+      if (res.error) alert(res.error);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function approve(id: string) {
+    setBusyId(id);
+    try {
+      const res = await approveServiceRequest(id);
+      if (res.error) alert(res.error);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function reject(id: string, rationale: string) {
+    setBusyId(id);
+    try {
+      const res = await rejectServiceRequest(id, rationale);
+      if (res.error) alert(res.error);
     } finally {
       setBusyId(null);
     }
@@ -124,12 +149,41 @@ export default function DashboardClient({
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {filtered.map((req) => {
-            const action = nextStatusFor(req.status);
-            const busy = busyId === req.id;
-            return (
+          {filtered.map((req) => (
+            <RequestCard
+              key={req.id}
+              req={req}
+              busy={busyId === req.id}
+              onAdvance={advance}
+              onApprove={approve}
+              onReject={reject}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RequestCard({
+  req,
+  busy,
+  onAdvance,
+  onApprove,
+  onReject,
+}: {
+  req: ServiceRequest;
+  busy: boolean;
+  onAdvance: (id: string, next: ServiceRequestStatus | null) => Promise<void>;
+  onApprove: (id: string) => Promise<void>;
+  onReject: (id: string, rationale: string) => Promise<void>;
+}) {
+  const action = nextStatusFor(req.status);
+  const [rejecting, setRejecting] = useState(false);
+  const [rationale, setRationale] = useState('');
+
+  return (
               <article
-                key={req.id}
                 className="card-sheen rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 shadow-xl shadow-black/20"
               >
                 <div className="flex flex-wrap gap-1.5">
@@ -164,11 +218,50 @@ export default function DashboardClient({
                   <span className="text-[11px] text-slate-500">
                     Updated {formatDate(req.updatedAt)}
                   </span>
-                  {action.next ? (
+                  {req.status === 'Submitted' ? (
+                    <span className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onAdvance(req.id, 'In Progress')}
+                        className={`rounded-xl px-3 py-1.5 text-xs font-bold shadow transition disabled:opacity-50 ${action.classes}`}
+                      >
+                        {busy ? 'Working…' : action.label}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onAdvance(req.id, 'Pending Approval')}
+                        title="Route this request through approval before work starts"
+                        className="rounded-xl border border-violet-400/40 px-3 py-1.5 text-xs font-bold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
+                      >
+                        Request approval
+                      </button>
+                    </span>
+                  ) : req.status === 'Pending Approval' ? (
+                    <span className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onApprove(req.id)}
+                        className="rounded-xl bg-violet-500 px-3 py-1.5 text-xs font-bold text-white shadow transition hover:bg-violet-400 disabled:opacity-50"
+                      >
+                        {busy ? 'Working…' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setRejecting((v) => !v)}
+                        className="rounded-xl border border-rose-400/40 px-3 py-1.5 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </span>
+                  ) : action.next ? (
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => advance(req.id, action.next)}
+                      onClick={() => onAdvance(req.id, action.next)}
                       className={`rounded-xl px-3 py-1.5 text-xs font-bold shadow transition disabled:opacity-50 ${action.classes}`}
                     >
                       {busy ? 'Working…' : action.label}
@@ -179,11 +272,48 @@ export default function DashboardClient({
                     <span className="text-xs font-medium text-slate-500">Declined</span>
                   )}
                 </div>
+                {rejecting && req.status === 'Pending Approval' && (
+                  <form
+                    className="mt-3 space-y-2 rounded-xl border border-rose-400/30 bg-rose-500/5 p-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void onReject(req.id, rationale).then(() => {
+                        setRejecting(false);
+                        setRationale('');
+                      });
+                    }}
+                  >
+                    <label className="block text-[11px] font-semibold text-rose-200">
+                      Rejection rationale (required)
+                    </label>
+                    <textarea
+                      value={rationale}
+                      onChange={(e) => setRationale(e.target.value)}
+                      rows={2}
+                      placeholder="Why is this being declined?"
+                      className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-rose-400 focus:outline-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        disabled={busy || rationale.trim().length === 0}
+                        className="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-400 disabled:opacity-50"
+                      >
+                        {busy ? 'Working…' : 'Confirm reject'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRejecting(false);
+                          setRationale('');
+                        }}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
               </article>
-            );
-          })}
-        </div>
-      )}
-    </div>
   );
 }

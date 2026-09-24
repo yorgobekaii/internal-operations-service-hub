@@ -44,12 +44,18 @@ describe('ServiceRequestsService', () => {
   let mockTx: {
     serviceRequest: { create: jest.Mock; update: jest.Mock };
     auditEntry: { create: jest.Mock };
+    approvalStep: { create: jest.Mock; findMany: jest.Mock; updateMany: jest.Mock };
   };
 
   beforeEach(async () => {
     mockTx = {
       serviceRequest: { create: jest.fn(), update: jest.fn() },
       auditEntry: { create: jest.fn().mockResolvedValue({ id: 'audit-1' }) },
+      approvalStep: {
+        create: jest.fn().mockResolvedValue({ id: 'step-1' }),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -72,6 +78,11 @@ describe('ServiceRequestsService', () => {
             user: {
               findUnique: jest.fn().mockResolvedValue(null),
               create: jest.fn(),
+            },
+            approvalStep: {
+              findMany: jest.fn().mockResolvedValue([]),
+              create: jest.fn(),
+              updateMany: jest.fn(),
             },
             queue: {
               findUnique: jest.fn(),
@@ -326,6 +337,155 @@ describe('ServiceRequestsService', () => {
       await service.findAll({ userId: 'root@internal.local', role: 'admin' });
       expect(findMany).toHaveBeenCalledWith({
         where: {},
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+  });
+
+  describe('Step C: Approval gate', () => {
+    const pendingRow = () =>
+      buildRow({ status: 'Pending Approval', queueId: 'queue-it' });
+    const pendingStep = (overrides = {}) => ({
+      id: 'step-1',
+      requestId: 'test-id',
+      approverId: null,
+      status: 'pending',
+      rationale: null,
+      decidedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+
+    it('opens a pending approval step when entering Pending Approval', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Submitted' }));
+      mockTx.serviceRequest.update.mockResolvedValue(pendingRow());
+
+      await service.updateStatus('test-id', { status: 'Pending Approval' });
+
+      expect(mockTx.approvalStep.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          requestId: 'test-id',
+          status: 'pending',
+        }),
+      });
+    });
+
+    it('blocks PATCH directly to In Progress while steps are pending (422)', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(pendingRow());
+      jest
+        .spyOn(prisma.approvalStep, 'findMany')
+        .mockResolvedValue([pendingStep()]);
+
+      await expect(
+        service.updateStatus('test-id', { status: 'In Progress' }),
+      ).rejects.toThrow('Approval required before fulfillment can start');
+      expect(mockTx.serviceRequest.update).not.toHaveBeenCalled();
+    });
+
+    it('approve() releases to In Progress and records an approved audit', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(pendingRow());
+      jest
+        .spyOn(prisma.approvalStep, 'findMany')
+        .mockResolvedValue([pendingStep()]);
+      mockTx.serviceRequest.update.mockResolvedValue(
+        buildRow({ status: 'In Progress', queueId: 'queue-it' }),
+      );
+
+      const result = await service.approve('test-id', {}, 'boss');
+
+      expect(result.status).toBe('In Progress');
+      expect(mockTx.approvalStep.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'test-id', status: 'pending' },
+        data: expect.objectContaining({ status: 'approved', approverId: 'boss' }),
+      });
+      expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          from: 'Pending Approval',
+          to: 'In Progress',
+          action: 'approved',
+        }),
+      });
+    });
+
+    it('reject() requires a rationale and declines with a rejected audit', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(pendingRow());
+
+      await expect(service.reject('test-id', { rationale: '' })).rejects.toThrow(
+        'A rejection rationale is required.',
+      );
+      await expect(
+        service.reject('test-id', {} as { rationale: string }),
+      ).rejects.toThrow('A rejection rationale is required.');
+
+      jest
+        .spyOn(prisma.approvalStep, 'findMany')
+        .mockResolvedValue([pendingStep()]);
+      mockTx.serviceRequest.update.mockResolvedValue(
+        buildRow({ status: 'Declined', queueId: 'queue-it' }),
+      );
+
+      const result = await service.reject(
+        'test-id',
+        { rationale: 'Over budget' },
+        'boss',
+      );
+
+      expect(result.status).toBe('Declined');
+      expect(mockTx.approvalStep.updateMany).toHaveBeenCalledWith({
+        where: { requestId: 'test-id', status: 'pending' },
+        data: expect.objectContaining({
+          status: 'rejected',
+          rationale: 'Over budget',
+        }),
+      });
+      expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          from: 'Pending Approval',
+          to: 'Declined',
+          action: 'rejected',
+        }),
+      });
+    });
+
+    it('approve()/reject() refuse non-pending requests', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Submitted' }));
+
+      await expect(service.approve('test-id', {})).rejects.toThrow(
+        'Only requests pending approval can be approved',
+      );
+      await expect(
+        service.reject('test-id', { rationale: 'nope' }),
+      ).rejects.toThrow('Only requests pending approval can be rejected');
+    });
+
+    it('findApprovals lists gated requests, filterable by approver', async () => {
+      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
+      await service.findApprovals();
+      expect(findMany).toHaveBeenCalledWith({
+        where: { status: 'Pending Approval' },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue([
+        pendingStep({ approverId: null }),
+      ]);
+      await service.findApprovals(undefined, 'boss@internal.local');
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          status: 'Pending Approval',
+          id: { in: ['test-id'] },
+        },
         orderBy: { createdAt: 'desc' },
       });
     });

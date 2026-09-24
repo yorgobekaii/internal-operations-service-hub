@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { SERVICE_REQUEST_ROUTES, type ServiceRequest } from '@internal/shared';
+import { APPROVALS_ROUTE, type ServiceRequest } from '@internal/shared';
 import DashboardClient from '../components/DashboardClient';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ async function load(): Promise<ServiceRequest[]> {
     if (id) headers['x-user-id'] = id;
     if (role) headers['x-user-role'] = role;
     if (dept) headers['x-user-dept'] = dept;
-    const res = await fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.base}`, {
+    const res = await fetch(`${API_BASE}${APPROVALS_ROUTE}`, {
       cache: 'no-store',
       headers,
     });
@@ -28,8 +28,7 @@ async function load(): Promise<ServiceRequest[]> {
 }
 
 export default async function ApprovalsPage() {
-  const all = await load();
-  const pending = all.filter((r) => r.status === 'Pending Approval');
+  const pending = await load();
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
@@ -49,7 +48,7 @@ export default async function ApprovalsPage() {
 
       <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4 text-sm text-violet-100">
         <span className="font-bold">{pending.length} awaiting decision</span>
-        <span className="text-violet-300"> — approve from each card to release it.</span>
+        <span className="text-violet-300"> — approve or reject with rationale from each card.</span>
       </div>
 
       <DashboardClient initial={pending} />

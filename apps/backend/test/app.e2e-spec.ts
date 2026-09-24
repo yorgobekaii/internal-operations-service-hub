@@ -222,7 +222,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .expect(400);
   });
 
-  it('Approval gating: Submitted -> Pending Approval -> In Progress succeeds', async () => {
+  it('Approval gating: Submitted -> Pending Approval opens a step; direct PATCH to In Progress is 422 until approved', async () => {
     const postRes = await createRequest('E2E Approval Gate', 'Finance');
     const id = postRes.body.id;
     expect(postRes.body.status).toBe('Submitted');
@@ -237,14 +237,21 @@ describe('AppController (e2e) [isolated test.db]', () => {
           throw new Error('Expected Pending Approval');
       });
 
+    // Gate enforced: fulfillment cannot start while approval is pending.
     await request(app.getHttpServer())
       .patch(`/service-requests/${id}/status`)
       .set(USER_ROLE_HEADER, 'admin')
       .send({ status: 'In Progress' })
-      .expect(200)
+      .expect(422);
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/approve`)
+      .set(USER_ROLE_HEADER, 'admin')
+      .send({})
+      .expect(201)
       .expect((res) => {
         if (res.body.status !== 'In Progress')
-          throw new Error('Expected In Progress');
+          throw new Error('Expected In Progress after approval');
       });
   });
 
@@ -472,5 +479,116 @@ describe('AppController (e2e) [isolated test.db]', () => {
     await request(app.getHttpServer())
       .get('/queues/no-such-queue/requests')
       .expect(404);
+  });
+
+  it('Step C: reject requires rationale, then declines with rejected audit', async () => {
+    const postRes = await createRequest('E2E Reject Flow', 'Finance');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Pending Approval' })
+      .expect(200);
+
+    // Missing rationale is refused; state unchanged.
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/reject`)
+      .set(USER_ROLE_HEADER, 'admin')
+      .send({})
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/reject`)
+      .set(USER_ROLE_HEADER, 'admin')
+      .set(USER_ID_HEADER, 'cfo@internal.local')
+      .send({ rationale: 'Over budget for Q3' })
+      .expect(201)
+      .expect((res) => {
+        if (res.body.status !== 'Declined') throw new Error('Expected Declined');
+      });
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/audit`)
+      .expect(200);
+    const last = audit.body[audit.body.length - 1];
+    expect(last).toMatchObject({
+      from: 'Pending Approval',
+      to: 'Declined',
+      action: 'rejected',
+      actorId: 'cfo@internal.local',
+    });
+
+    const steps = await prisma.approvalStep.findMany({ where: { requestId: id } });
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ status: 'rejected', rationale: 'Over budget for Q3' });
+  });
+
+  it('Step C: approve records approver + approved audit; double-decide is refused', async () => {
+    const postRes = await createRequest('E2E Approve Flow', 'IT');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Pending Approval' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/approve`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .set(USER_ID_HEADER, 'it.lead@internal.local')
+      .send({})
+      .expect(201);
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/audit`)
+      .expect(200);
+    const last = audit.body[audit.body.length - 1];
+    expect(last).toMatchObject({
+      from: 'Pending Approval',
+      to: 'In Progress',
+      action: 'approved',
+      actorId: 'it.lead@internal.local',
+    });
+
+    // Decided twice is refused: no longer pending.
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/approve`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({})
+      .expect(400);
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/reject`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ rationale: 'too late' })
+      .expect(400);
+  });
+
+  it('Step C: approve/reject need operator role; GET /approvals lists the gate', async () => {
+    const postRes = await createRequest('E2E Approvals Queue', 'Operations');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/approve`)
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Pending Approval' })
+      .expect(200);
+
+    const queue = await request(app.getHttpServer()).get('/approvals').expect(200);
+    expect(queue.body.map((r: { id: string }) => r.id)).toContain(id);
+
+    // Requester sees only their own gated items.
+    const other = await request(app.getHttpServer())
+      .get('/approvals')
+      .set(USER_ID_HEADER, 'stranger@internal.local')
+      .set(USER_ROLE_HEADER, 'requester')
+      .expect(200);
+    expect(other.body.map((r: { id: string }) => r.id)).not.toContain(id);
   });
 });
