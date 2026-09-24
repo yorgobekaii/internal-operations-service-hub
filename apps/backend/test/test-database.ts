@@ -42,7 +42,7 @@ export function ensureTestDatabase(): void {
 export async function cleanupTestDatabase(
   prisma: PrismaService,
 ): Promise<void> {
-  for (const model of ['auditEntry', 'approvalStep', 'serviceRequest', 'queue', 'user'] as const) {
+  for (const model of ['auditEntry', 'approvalStep', 'comment', 'serviceRequest', 'queue', 'user'] as const) {
     try {
       await (prisma[model] as { deleteMany: (args: unknown) => Promise<unknown> }).deleteMany({});
     } catch {

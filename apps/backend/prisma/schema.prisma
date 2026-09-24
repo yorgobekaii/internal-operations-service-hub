@@ -73,3 +73,13 @@ model AuditEntry {
 
   @@index([requestId, createdAt])
 }
+
+model Comment {
+  id        String   @id @default(uuid())
+  requestId String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
+}

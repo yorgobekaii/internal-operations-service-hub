@@ -83,7 +83,12 @@ export interface ApprovalStep {
   updatedAt: string | Date;
 }
 
-export type AuditAction = 'created' | 'status_changed' | 'approved' | 'rejected';
+export type AuditAction =
+  | 'created'
+  | 'status_changed'
+  | 'approved'
+  | 'rejected'
+  | 'commented';
 
 export interface AuditEntry {
   id: string;
@@ -93,6 +98,19 @@ export interface AuditEntry {
   to: ServiceRequestStatus | null;
   action: AuditAction | string;
   createdAt: string | Date;
+}
+
+export interface Comment {
+  id: string;
+  requestId: string;
+  authorId: string;
+  body: string;
+  createdAt: string | Date;
+}
+
+export interface CreateCommentDto {
+  body: string;
+  authorId?: string;
 }
 
 export type ServiceRequestPriority = 'Urgent' | 'High' | 'Standard' | 'Low';
@@ -161,6 +179,7 @@ export const SERVICE_REQUEST_ROUTES = {
   auditById: (id: string) => `/service-requests/${id}/audit`,
   approveById: (id: string) => `/service-requests/${id}/approve`,
   rejectById: (id: string) => `/service-requests/${id}/reject`,
+  commentsById: (id: string) => `/service-requests/${id}/comments`,
   aiTriage: '/service-requests/ai-triage',
 } as const;
 

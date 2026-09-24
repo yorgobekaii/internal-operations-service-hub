@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   approveServiceRequest,
   rejectServiceRequest,
@@ -203,7 +204,11 @@ function RequestCard({
                     {req.priority ?? 'Standard'}
                   </span>
                 </div>
-                <h3 className="mt-3 text-[15px] font-bold text-white">{req.title}</h3>
+                <h3 className="mt-3 text-[15px] font-bold text-white">
+                  <Link href={`/requests/${req.id}`} className="hover:text-indigo-200 hover:underline">
+                    {req.title}
+                  </Link>
+                </h3>
                 {(req.queueId || req.ownerId || req.requesterId) && (
                   <p className="mt-1 text-[11px] text-slate-500">
                     {req.category} queue
@@ -216,7 +221,10 @@ function RequestCard({
                 </p>
                 <div className="mt-4 flex items-center justify-between gap-3">
                   <span className="text-[11px] text-slate-500">
-                    Updated {formatDate(req.updatedAt)}
+                    Updated {formatDate(req.updatedAt)} ·{' '}
+                    <Link href={`/requests/${req.id}`} className="font-semibold text-indigo-300 hover:text-indigo-200 hover:underline">
+                      Open →
+                    </Link>
                   </span>
                   {req.status === 'Submitted' ? (
                     <span className="flex gap-2">

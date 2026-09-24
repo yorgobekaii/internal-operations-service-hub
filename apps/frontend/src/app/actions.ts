@@ -58,10 +58,38 @@ export async function createServiceRequest(formData: FormData) {
       return { error: errorData.message || 'Failed to create request' };
     }
 
+    const created = (await res.json()) as { id?: string };
     revalidatePath('/');
     revalidatePath('/new');
     revalidatePath('/approvals');
-    return { success: true };
+    return { success: true as const, id: created.id };
+  } catch {
+    return { error: 'Failed to connect to backend' };
+  }
+}
+
+export async function addComment(id: string, formData: FormData) {
+  const body = ((formData.get('body') as string) ?? '').trim();
+  if (!body) {
+    return { error: 'Write something first.' };
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/${id}/comments`, {
+      method: 'POST',
+      headers: await identityHeaders(),
+      body: JSON.stringify({ body }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      return { error: errorData.message || 'Failed to post comment' };
+    }
+
+    revalidatePath(`/requests/${id}`);
+    revalidatePath('/');
+    revalidatePath('/approvals');
+    return { success: true as const };
   } catch {
     return { error: 'Failed to connect to backend' };
   }

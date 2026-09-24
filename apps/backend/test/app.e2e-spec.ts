@@ -40,6 +40,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
     // Start clean inside the isolated DB.
     await prisma.auditEntry.deleteMany({}).catch(() => undefined);
     await prisma.approvalStep.deleteMany({}).catch(() => undefined);
+    await prisma.comment.deleteMany({}).catch(() => undefined);
     await prisma.serviceRequest.deleteMany({});
     await prisma.queue.deleteMany({}).catch(() => undefined);
     await prisma.user.deleteMany({}).catch(() => undefined);
@@ -47,6 +48,13 @@ describe('AppController (e2e) [isolated test.db]', () => {
 
   afterAll(async () => {
     if (createdIds.length > 0) {
+      try {
+        await prisma.comment.deleteMany({
+          where: { requestId: { in: createdIds } },
+        });
+      } catch {
+        // Comment table missing or app torn down — nothing to clean.
+      }
       try {
         await prisma.auditEntry.deleteMany({
           where: { requestId: { in: createdIds } },
@@ -590,5 +598,103 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .set(USER_ROLE_HEADER, 'requester')
       .expect(200);
     expect(other.body.map((r: { id: string }) => r.id)).not.toContain(id);
+  });
+
+  it('Step D: blocking requires a reason, which is then visible', async () => {
+    const postRes = await createRequest('E2E Blocked Reason', 'IT');
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Blocked' })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Blocked', blockedReason: 'Waiting on vendor part' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.blockedReason !== 'Waiting on vendor part')
+          throw new Error('Expected blockedReason to persist');
+      });
+
+    const getRes = await request(app.getHttpServer())
+      .get(`/service-requests/${id}`)
+      .expect(200);
+    expect(getRes.body.blockedReason).toBe('Waiting on vendor part');
+
+    // Resuming clears the reason.
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.blockedReason !== null)
+          throw new Error('Expected blockedReason to clear on resume');
+      });
+  });
+
+  it('Step D: comments post, list oldest-first, and audit the thread', async () => {
+    const postRes = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set(USER_ID_HEADER, 'alice@internal.local')
+      .set(USER_ROLE_HEADER, 'requester')
+      .send({ title: 'E2E Comments', category: 'HR' })
+      .expect(201);
+    createdIds.push(postRes.body.id);
+    const id = postRes.body.id;
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/comments`)
+      .send({})
+      .expect(400);
+
+    const first = await request(app.getHttpServer())
+      .post(`/service-requests/${id}/comments`)
+      .set(USER_ID_HEADER, 'alice@internal.local')
+      .send({ body: 'Any update on this?' })
+      .expect(201);
+    expect(first.body).toMatchObject({
+      requestId: id,
+      authorId: 'alice@internal.local',
+      body: 'Any update on this?',
+    });
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/comments`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ body: 'On it today.' })
+      .expect(201);
+
+    const list = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/comments`)
+      .expect(200);
+    expect(list.body).toHaveLength(2);
+    expect(list.body[0].body).toBe('Any update on this?');
+    expect(list.body[1].body).toBe('On it today.');
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/audit`)
+      .expect(200);
+    expect(
+      audit.body.filter((e: { action: string }) => e.action === 'commented'),
+    ).toHaveLength(2);
+
+    await request(app.getHttpServer())
+      .get('/service-requests/non-existent-id-12345/comments')
+      .expect(404);
+    await request(app.getHttpServer())
+      .post('/service-requests/non-existent-id-12345/comments')
+      .send({ body: 'hello' })
+      .expect(404);
   });
 });

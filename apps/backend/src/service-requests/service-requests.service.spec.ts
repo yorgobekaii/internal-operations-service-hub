@@ -45,6 +45,7 @@ describe('ServiceRequestsService', () => {
     serviceRequest: { create: jest.Mock; update: jest.Mock };
     auditEntry: { create: jest.Mock };
     approvalStep: { create: jest.Mock; findMany: jest.Mock; updateMany: jest.Mock };
+    comment: { create: jest.Mock; findMany: jest.Mock };
   };
 
   beforeEach(async () => {
@@ -55,6 +56,10 @@ describe('ServiceRequestsService', () => {
         create: jest.fn().mockResolvedValue({ id: 'step-1' }),
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      comment: {
+        create: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
 
@@ -83,6 +88,10 @@ describe('ServiceRequestsService', () => {
               findMany: jest.fn().mockResolvedValue([]),
               create: jest.fn(),
               updateMany: jest.fn(),
+            },
+            comment: {
+              findMany: jest.fn().mockResolvedValue([]),
+              create: jest.fn(),
             },
             queue: {
               findUnique: jest.fn(),
@@ -488,6 +497,82 @@ describe('ServiceRequestsService', () => {
         },
         orderBy: { createdAt: 'desc' },
       });
+    });
+  });
+
+  describe('Step D: Blocking and comments', () => {
+    it('blocking without a reason is refused (400)', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'In Progress' }));
+
+      await expect(
+        service.updateStatus('test-id', { status: 'Blocked' }),
+      ).rejects.toThrow('A blockage reason is required to block a request.');
+      await expect(
+        service.updateStatus('test-id', { status: 'Blocked', blockedReason: '  ' }),
+      ).rejects.toThrow('A blockage reason is required to block a request.');
+      expect(mockTx.serviceRequest.update).not.toHaveBeenCalled();
+    });
+
+    it('blocking with a reason stores the trimmed reason', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'In Progress' }));
+      mockTx.serviceRequest.update.mockResolvedValue(
+        buildRow({ status: 'Blocked', blockedReason: 'Waiting on vendor' }),
+      );
+
+      const result = await service.updateStatus('test-id', {
+        status: 'Blocked',
+        blockedReason: '  Waiting on vendor  ',
+      });
+
+      expect(result.status).toBe('Blocked');
+      expect(result.blockedReason).toBe('Waiting on vendor');
+      expect(mockTx.serviceRequest.update).toHaveBeenCalledWith({
+        where: { id: 'test-id' },
+        data: expect.objectContaining({ blockedReason: 'Waiting on vendor' }),
+      });
+    });
+
+    it('addComment stores the comment and writes a commented audit', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'In Progress' }));
+      mockTx.comment.create.mockImplementation(async (args: {
+        data: Record<string, unknown>;
+      }) =>
+        Promise.resolve({
+          id: 'c1',
+          requestId: 'test-id',
+          authorId: args.data['authorId'],
+          body: args.data['body'],
+          createdAt: new Date(),
+        }),
+      );
+
+      const comment = await service.addComment(
+        'test-id',
+        { body: '  Any update?  ' },
+        'requester-alice',
+      );
+
+      expect(comment.body).toBe('Any update?');
+      expect(comment.authorId).toBe('requester-alice');
+      expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ action: 'commented' }),
+      });
+    });
+
+    it('addComment refuses empty bodies', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'In Progress' }));
+
+      await expect(service.addComment('test-id', { body: '   ' })).rejects.toThrow(
+        'Comment body is required.',
+      );
     });
   });
 });

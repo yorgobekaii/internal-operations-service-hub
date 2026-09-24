@@ -1,10 +1,12 @@
 import type {
   ServiceRequest as PrismaServiceRequest,
   AuditEntry as PrismaAuditEntry,
+  Comment as PrismaComment,
 } from '@prisma/client';
 import type {
   ServiceRequest as SharedServiceRequest,
   AuditEntry as SharedAuditEntry,
+  Comment as SharedComment,
   ServiceRequestCategory,
   ServiceRequestPriority,
   ServiceRequestStatus,
@@ -47,6 +49,16 @@ export function toAuditContract(row: PrismaAuditEntry): SharedAuditEntry {
     from: (row.from as ServiceRequestStatus | null) ?? null,
     to: (row.to as ServiceRequestStatus | null) ?? null,
     action: row.action,
+    createdAt: row.createdAt,
+  };
+}
+
+export function toCommentContract(row: PrismaComment): SharedComment {
+  return {
+    id: row.id,
+    requestId: row.requestId,
+    authorId: row.authorId,
+    body: row.body,
     createdAt: row.createdAt,
   };
 }

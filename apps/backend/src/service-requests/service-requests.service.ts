@@ -7,6 +7,7 @@
 } from '@nestjs/common';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { CreateCommentDto } from './dto/create-comment.dto';
 import {
   ApproveServiceRequestDto,
   RejectServiceRequestDto,
@@ -16,11 +17,13 @@ import { QueuesService } from '../queues/queues.service';
 import {
   toContract,
   toAuditContract,
+  toCommentContract,
   computeSlaDueAt,
 } from './service-request.mapper';
 import type {
   ServiceRequest as SharedServiceRequest,
   AuditEntry as SharedAuditEntry,
+  Comment as SharedComment,
   RequestActor,
 } from '@internal/shared';
 import { ALLOWED_TRANSITIONS, OPERATOR_ROLES } from '@internal/shared';
@@ -214,7 +217,13 @@ export class ServiceRequestsService {
 
     const data: Record<string, unknown> = { status: nextStatus };
     if (nextStatus === 'Blocked') {
-      data['blockedReason'] = updateDto.blockedReason ?? null;
+      const reason = updateDto.blockedReason?.trim();
+      if (!reason) {
+        throw new BadRequestException(
+          'A blockage reason is required to block a request.',
+        );
+      }
+      data['blockedReason'] = reason;
     } else if (currentStatus === 'Blocked') {
       data['blockedReason'] = null;
     }
@@ -403,5 +412,47 @@ export class ServiceRequestsService {
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(toContract);
+  }
+
+  async listComments(
+    id: string,
+    actor?: RequestActor,
+  ): Promise<SharedComment[]> {
+    await this.findOne(id, actor);
+    const rows = await this.prisma.comment.findMany({
+      where: { requestId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(toCommentContract);
+  }
+
+  async addComment(
+    id: string,
+    dto: CreateCommentDto,
+    actorId = 'system',
+    actor?: RequestActor,
+  ): Promise<SharedComment> {
+    await this.findOne(id, actor);
+    const body = dto.body?.trim();
+    if (!body) {
+      throw new BadRequestException('Comment body is required.');
+    }
+    const author = dto.authorId ?? actor?.userId ?? actorId;
+    const row = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.comment.create({
+        data: { requestId: id, authorId: author, body },
+      });
+      await tx.auditEntry.create({
+        data: {
+          requestId: id,
+          actorId: author,
+          from: null,
+          to: null,
+          action: 'commented',
+        },
+      });
+      return created;
+    });
+    return toCommentContract(row);
   }
 }

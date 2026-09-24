@@ -2,6 +2,7 @@
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
+import { CreateCommentDto } from './dto/create-comment.dto';
 import {
   ApproveServiceRequestDto,
   RejectServiceRequestDto,
@@ -92,6 +93,34 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.getAuditTrail(
       id,
       resolveScope(headers ?? {}, req),
+    );
+  }
+
+  @Get(':id/comments')
+  async listComments(
+    @Param('id') id: string,
+    @Headers() headers: Record<string, unknown>,
+    @Req() req: unknown,
+  ) {
+    return this.serviceRequestsService.listComments(
+      id,
+      resolveScope(headers ?? {}, req),
+    );
+  }
+
+  @Post(':id/comments')
+  async addComment(
+    @Param('id') id: string,
+    @Body() dto: CreateCommentDto,
+    @Headers() headers: Record<string, unknown>,
+    @Req() req: unknown,
+  ) {
+    const scope = resolveScope(headers ?? {}, req);
+    return this.serviceRequestsService.addComment(
+      id,
+      dto ?? {},
+      resolveActor(headers ?? {}),
+      scope.userId ? scope : undefined,
     );
   }
 
