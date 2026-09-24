@@ -47,14 +47,7 @@ npm install
 npm run setup
 ```
 
-This builds `packages/shared` to plain JavaScript and creates `apps/backend/prisma/dev.db` with the `ServiceRequest` table. It runs:
-
-```bash
-npm run build --workspace=@internal/shared
-npm run prisma:push --workspace=@internal/backend
-```
-
-`prisma:push` is a workspace wrapper around `prisma db push` (equivalent to running `npx prisma db push` inside `apps/backend`). The datasource URL comes from `apps/backend/.env` (`DATABASE_URL="file:./dev.db"` — copy `apps/backend/.env.example` to `apps/backend/.env` on a fresh clone). For subsequent schema changes, use:
+For subsequent schema changes, use:
 
 ```bash
 npm run prisma:push --workspace=@internal/backend
@@ -82,9 +75,6 @@ In a separate terminal, from the repository root:
 ```bash
 npm run start:frontend
 ```
-
-(equivalent to `cd apps/frontend` + `npm run dev -- -p 3001`). The backend URL is read from `NEXT_PUBLIC_API_URL` with fallback `http://localhost:3000`, so no extra config is needed locally.
-
 The Next.js hub will be available at **`http://localhost:3001`** with three routes: `/` executive dashboard, `/new` intake, `/approvals` approval queue.
 
 Exercise the flow in the UI:
@@ -170,8 +160,6 @@ All 19 tests (4 unit + 15 e2e) must pass. See `docs/week3-full-stack-delivery.md
 ```bash
 npm run eval:triage
 ```
-
-(`eval:triage` = `build shared && jest --config ./test/jest-eval.json` — E1 clear IT/HR, E3 thin, E4 ambiguous, E5 Finance high-cost rule, E6 invalid model coercion, E7 provider 502, E8 malformed confidence. All 8 must pass. See `docs/week4-production-ai.md`.)
 
 **Groq (real LLM, optional):** default `AI_PROVIDER=mock` needs no key. Yes — the right procedure is putting values in `apps/backend/.env` (the backend loads that file automatically on boot, no export needed):
 
