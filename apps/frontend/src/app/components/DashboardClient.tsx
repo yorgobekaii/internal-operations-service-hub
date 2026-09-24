@@ -150,6 +150,13 @@ export default function DashboardClient({
                   </span>
                 </div>
                 <h3 className="mt-3 text-[15px] font-bold text-white">{req.title}</h3>
+                {(req.queueId || req.ownerId || req.requesterId) && (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {req.category} queue
+                    {req.ownerId ? ` · Owner ${req.ownerId.slice(0, 8)}` : ''}
+                    {req.requesterId ? ` · By ${req.requesterId}` : ''}
+                  </p>
+                )}
                 <p className="mt-1 font-mono text-[11px] text-slate-500">
                   {req.id.slice(0, 8)} · {formatDate(req.createdAt)}
                 </p>

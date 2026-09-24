@@ -1,7 +1,8 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceRequestsService } from './service-requests.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BadRequestException } from '@nestjs/common';
+import { QueuesService } from '../queues/queues.service';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ServiceRequest as PrismaServiceRequest } from '@prisma/client';
 
 function buildRow(
@@ -27,6 +28,16 @@ function buildRow(
   };
 }
 
+const IT_ROUTE = {
+  id: 'queue-it',
+  name: 'IT Queue',
+  category: 'IT',
+  ownerId: 'owner-it',
+  backupOwnerId: 'backup-it',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
 describe('ServiceRequestsService', () => {
   let service: ServiceRequestsService;
   let prisma: PrismaService;
@@ -49,17 +60,32 @@ describe('ServiceRequestsService', () => {
           useValue: {
             serviceRequest: {
               create: jest.fn(),
-              findMany: jest.fn(),
+              findMany: jest.fn().mockResolvedValue([]),
               findUnique: jest.fn(),
               update: jest.fn(),
+              count: jest.fn(),
             },
             auditEntry: {
               create: jest.fn(),
-              findMany: jest.fn(),
+              findMany: jest.fn().mockResolvedValue([]),
+            },
+            user: {
+              findUnique: jest.fn().mockResolvedValue(null),
+              create: jest.fn(),
+            },
+            queue: {
+              findUnique: jest.fn(),
+              findMany: jest.fn().mockResolvedValue([]),
             },
             $transaction: jest.fn(async (cb: (tx: unknown) => unknown) =>
               cb(mockTx),
             ),
+          },
+        },
+        {
+          provide: QueuesService,
+          useValue: {
+            routeForCategory: jest.fn().mockResolvedValue(IT_ROUTE),
           },
         },
       ],
@@ -183,6 +209,124 @@ describe('ServiceRequestsService', () => {
       expect(findMany).toHaveBeenCalledWith({
         where: { requestId: 'test-id' },
         orderBy: { createdAt: 'asc' },
+      });
+    });
+  });
+
+  describe('Step B: Routing', () => {
+    it('routes new requests to the category queue with owner + backup', async () => {
+      mockTx.serviceRequest.create.mockImplementation(async (args: {
+        data: Record<string, unknown>;
+      }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
+
+      const result = await service.create({ title: 'Laptop', category: 'IT' });
+
+      expect(result.queueId).toBe('queue-it');
+      expect(result.ownerId).toBe('owner-it');
+      expect(result.backupOwnerId).toBe('backup-it');
+      expect(mockTx.serviceRequest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ queueId: 'queue-it' }),
+      });
+    });
+
+    it('records the header identity as requesterId', async () => {
+      mockTx.serviceRequest.create.mockImplementation(async (args: {
+        data: Record<string, unknown>;
+      }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
+
+      const result = await service.create(
+        { title: 'Laptop', category: 'IT' },
+        'alice',
+        { userId: 'alice@internal.local', role: 'requester' },
+      );
+
+      expect(result.requesterId).toBe('alice@internal.local');
+    });
+  });
+
+  describe('Step B: Row-level scoping', () => {
+    it('legacy callers without identity still see everything', async () => {
+      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
+      await service.findAll();
+      expect(findMany).toHaveBeenCalledWith({
+        where: {},
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+
+    it('requesters only see their own requests', async () => {
+      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({
+        id: 'u-alice',
+        email: 'alice@internal.local',
+        role: 'requester',
+        department: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
+
+      await service.findAll({ userId: 'alice@internal.local', role: 'requester' });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { requesterId: 'alice@internal.local' },
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+
+    it('requesters cannot open someone else\u2019s request', async () => {
+      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({
+        id: 'u-alice',
+        email: 'alice@internal.local',
+        role: 'requester',
+        department: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ requesterId: 'bob@internal.local' }));
+
+      await expect(
+        service.findOne('test-id', { userId: 'alice@internal.local' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('department operators are confined to their queue', async () => {
+      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({
+        id: 'u-op',
+        email: 'op@internal.local',
+        role: 'operator',
+        department: 'IT',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      jest.spyOn(prisma.queue, 'findMany').mockResolvedValue([
+        {
+          id: 'queue-it',
+          name: 'IT Queue',
+          category: 'IT',
+          ownerId: 'owner-it',
+          backupOwnerId: 'backup-it',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
+
+      await service.findAll({ userId: 'op@internal.local', role: 'operator' });
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { queueId: { in: ['queue-it'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+
+    it('admins see everything', async () => {
+      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
+      await service.findAll({ userId: 'root@internal.local', role: 'admin' });
+      expect(findMany).toHaveBeenCalledWith({
+        where: {},
+        orderBy: { createdAt: 'desc' },
       });
     });
   });

@@ -1,9 +1,12 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import {
   OPERATOR_ROLES,
   SERVICE_REQUEST_ROUTES,
+  USER_DEPT_HEADER,
+  USER_ID_HEADER,
   USER_ROLE_HEADER,
   type AiTriageSuggestion,
   type OperatorRole,
@@ -15,6 +18,22 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 const API_URL = `${API_BASE}${SERVICE_REQUEST_ROUTES.base}`;
 const AI_TRIAGE_URL = `${API_BASE}${SERVICE_REQUEST_ROUTES.aiTriage}`;
 const OPERATOR_ROLE: OperatorRole = OPERATOR_ROLES[0];
+
+async function identityHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const store = await cookies();
+    const id = store.get(USER_ID_HEADER)?.value ?? store.get('x-user-id')?.value;
+    const role = store.get(USER_ROLE_HEADER)?.value ?? store.get('x-user-role')?.value;
+    const dept = store.get(USER_DEPT_HEADER)?.value ?? store.get('x-user-dept')?.value;
+    if (id) headers[USER_ID_HEADER] = id;
+    if (role) headers[USER_ROLE_HEADER] = role;
+    if (dept) headers[USER_DEPT_HEADER] = dept;
+  } catch {
+    // cookies() unavailable (e.g. prerender) — fall back to anonymous.
+  }
+  return headers;
+}
 
 export async function createServiceRequest(formData: FormData) {
   const title = formData.get('title') as string;
@@ -28,9 +47,7 @@ export async function createServiceRequest(formData: FormData) {
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: await identityHeaders(),
       body: JSON.stringify(
         priority ? { title, category, priority } : { title, category },
       ),
@@ -93,12 +110,11 @@ export async function updateServiceRequestStatus(
   status: ServiceRequestStatus,
 ) {
   try {
+    const headers = await identityHeaders();
+    if (!headers[USER_ROLE_HEADER]) headers[USER_ROLE_HEADER] = OPERATOR_ROLE;
     const res = await fetch(`${API_URL}/${id}/status`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        [USER_ROLE_HEADER]: OPERATOR_ROLE,
-      },
+      headers,
       body: JSON.stringify({ status }),
     });
 

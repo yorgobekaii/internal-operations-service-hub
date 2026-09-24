@@ -3,81 +3,112 @@
   BadRequestException,
   UnprocessableEntityException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import type {
-  ServiceRequest as PrismaServiceRequest,
-  AuditEntry as PrismaAuditEntry,
-} from '@prisma/client';
+import { QueuesService } from '../queues/queues.service';
+import {
+  toContract,
+  toAuditContract,
+  computeSlaDueAt,
+} from './service-request.mapper';
 import type {
   ServiceRequest as SharedServiceRequest,
   AuditEntry as SharedAuditEntry,
-  ServiceRequestCategory,
-  ServiceRequestPriority,
-  ServiceRequestStatus,
+  RequestActor,
 } from '@internal/shared';
-import {
-  ALLOWED_TRANSITIONS,
-  SERVICE_REQUEST_PRIORITIES,
-  SLA_HOURS,
-} from '@internal/shared';
+import { ALLOWED_TRANSITIONS, OPERATOR_ROLES } from '@internal/shared';
 
-function toContract(row: PrismaServiceRequest): SharedServiceRequest {
-  const priority = (SERVICE_REQUEST_PRIORITIES as string[]).includes(
-    row.priority,
-  )
-    ? (row.priority as ServiceRequestPriority)
-    : 'Standard';
-  return {
-    id: row.id,
-    title: row.title,
-    category: row.category as ServiceRequestCategory,
-    status: row.status as ServiceRequestStatus,
-    priority,
-    description: row.description ?? null,
-    requesterId: row.requesterId ?? null,
-    queueId: row.queueId ?? null,
-    ownerId: row.ownerId ?? null,
-    backupOwnerId: row.backupOwnerId ?? null,
-    blockedReason: row.blockedReason ?? null,
-    slaDueAt: row.slaDueAt ?? null,
-    payloadJson: row.payloadJson ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
+type Scope =
+  | { mode: 'all' }
+  | { mode: 'own'; userId: string }
+  | { mode: 'dept'; userId: string; department: string };
 
-function toAuditContract(row: PrismaAuditEntry): SharedAuditEntry {
-  return {
-    id: row.id,
-    requestId: row.requestId,
-    actorId: row.actorId,
-    from: (row.from as ServiceRequestStatus | null) ?? null,
-    to: (row.to as ServiceRequestStatus | null) ?? null,
-    action: row.action,
-    createdAt: row.createdAt,
-  };
-}
-
-function computeSlaDueAt(
-  priority: ServiceRequestPriority,
-  from: Date = new Date(),
-): Date {
-  const hours = SLA_HOURS[priority] ?? SLA_HOURS.Standard;
-  return new Date(from.getTime() + hours * 60 * 60 * 1000);
+function isOperatorRole(role?: string | null): boolean {
+  return !!role && (OPERATOR_ROLES as readonly string[]).includes(role);
 }
 
 @Injectable()
 export class ServiceRequestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly queues: QueuesService,
+  ) {}
+
+  /**
+   * Dev-stub identity: header-trust model (same as AuthGuard). First sight
+   * of an x-user-id provisions a User row so row-level scoping has
+   * something to key on. Existing rows are never overwritten here.
+   */
+  private async ensureUser(actor?: RequestActor) {
+    if (!actor?.userId) return null;
+    const existing = await this.prisma.user.findUnique({
+      where: { email: actor.userId },
+    });
+    if (existing) return existing;
+    return this.prisma.user.create({
+      data: {
+        email: actor.userId,
+        role: actor.role ?? 'requester',
+        department: actor.department ?? null,
+      },
+    });
+  }
+
+  private async resolveScope(actor?: RequestActor): Promise<Scope> {
+    if (!actor?.userId) return { mode: 'all' };
+    if (actor.role === 'admin') return { mode: 'all' };
+    const user = await this.ensureUser(actor);
+    const role = user?.role ?? actor.role ?? 'requester';
+    if (role === 'admin') return { mode: 'all' };
+    if (isOperatorRole(role)) {
+      const department = user?.department ?? actor.department;
+      if (!department) return { mode: 'all' };
+      return { mode: 'dept', userId: actor.userId, department };
+    }
+    return { mode: 'own', userId: actor.userId };
+  }
+
+  private async deptQueueIds(department: string): Promise<string[]> {
+    const queues = await this.prisma.queue.findMany({
+      where: { category: department },
+    });
+    return queues.map((q) => q.id);
+  }
+
+  private buildWhere(scope: Scope): Record<string, unknown> {
+    if (scope.mode === 'own') return { requesterId: scope.userId };
+    return {};
+  }
+
+  private async enforceScope(
+    request: { id: string; requesterId: string | null; queueId: string | null },
+    scope: Scope,
+  ): Promise<void> {
+    if (scope.mode === 'all') return;
+    if (scope.mode === 'own') {
+      if (request.requesterId !== scope.userId) {
+        throw new ForbiddenException('Forbidden: not your request');
+      }
+      return;
+    }
+    const allowed = await this.deptQueueIds(scope.department);
+    if (!request.queueId || !allowed.includes(request.queueId)) {
+      throw new ForbiddenException('Forbidden: outside your department queue');
+    }
+  }
 
   async create(
     createDto: CreateServiceRequestDto,
     actorId = 'system',
+    actor?: RequestActor,
   ): Promise<SharedServiceRequest> {
     const priority = createDto.priority ?? 'Standard';
+    const route = await this.queues.routeForCategory(createDto.category);
+    const requesterId = createDto.requesterId ?? actor?.userId ?? null;
+    if (actor?.userId) await this.ensureUser(actor);
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.serviceRequest.create({
         data: {
@@ -86,9 +117,10 @@ export class ServiceRequestsService {
           status: 'Submitted',
           priority,
           description: createDto.description ?? null,
-          requesterId: createDto.requesterId ?? null,
-          queueId: createDto.queueId ?? null,
-          ownerId: createDto.ownerId ?? null,
+          requesterId,
+          queueId: createDto.queueId ?? route.id,
+          ownerId: createDto.ownerId ?? route.ownerId,
+          backupOwnerId: route.backupOwnerId,
           payloadJson: createDto.payloadJson ?? null,
           slaDueAt: computeSlaDueAt(priority),
         },
@@ -107,14 +139,24 @@ export class ServiceRequestsService {
     return toContract(row);
   }
 
-  async findAll(): Promise<SharedServiceRequest[]> {
+  async findAll(actor?: RequestActor): Promise<SharedServiceRequest[]> {
+    const scope = await this.resolveScope(actor);
+    if (scope.mode === 'dept') {
+      const ids = await this.deptQueueIds(scope.department);
+      const rows = await this.prisma.serviceRequest.findMany({
+        where: { queueId: { in: ids } },
+        orderBy: { createdAt: 'desc' },
+      });
+      return rows.map(toContract);
+    }
     const rows = await this.prisma.serviceRequest.findMany({
+      where: this.buildWhere(scope) as never,
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(toContract);
   }
 
-  async findOne(id: string): Promise<SharedServiceRequest> {
+  async findOne(id: string, actor?: RequestActor): Promise<SharedServiceRequest> {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
     });
@@ -122,6 +164,8 @@ export class ServiceRequestsService {
     if (!request) {
       throw new NotFoundException(`ServiceRequest with ID ${id} not found`);
     }
+    const scope = await this.resolveScope(actor);
+    await this.enforceScope(request, scope);
     return toContract(request);
   }
 
@@ -129,8 +173,9 @@ export class ServiceRequestsService {
     id: string,
     updateDto: UpdateServiceRequestStatusDto,
     actorId = 'system',
+    actor?: RequestActor,
   ): Promise<SharedServiceRequest> {
-    const request = await this.findOne(id);
+    const request = await this.findOne(id, actor);
     const currentStatus = request.status;
     const nextStatus = updateDto.status;
 
@@ -178,8 +223,11 @@ export class ServiceRequestsService {
     return toContract(row);
   }
 
-  async getAuditTrail(id: string): Promise<SharedAuditEntry[]> {
-    await this.findOne(id);
+  async getAuditTrail(
+    id: string,
+    actor?: RequestActor,
+  ): Promise<SharedAuditEntry[]> {
+    await this.findOne(id, actor);
     const rows = await this.prisma.auditEntry.findMany({
       where: { requestId: id },
       orderBy: { createdAt: 'asc' },

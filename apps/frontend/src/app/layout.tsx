@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import Link from 'next/link';
+import RoleSwitcher from './components/RoleSwitcher';
 import './globals.css';
 
 const geistSans = Geist({
@@ -57,6 +58,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
               <NavLink href="/new" label="New Request" />
               <NavLink href="/approvals" label="Approvals" />
             </nav>
+            <RoleSwitcher />
           </div>
         </header>
         <div className="flex-1">{children}</div>

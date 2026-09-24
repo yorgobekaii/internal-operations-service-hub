@@ -1,4 +1,5 @@
-﻿import { SERVICE_REQUEST_ROUTES, type ServiceRequest } from '@internal/shared';
+﻿import { cookies } from 'next/headers';
+import { SERVICE_REQUEST_ROUTES, type ServiceRequest } from '@internal/shared';
 import AiAssistant from './components/AiAssistant';
 import DashboardClient from './components/DashboardClient';
 
@@ -8,8 +9,17 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 async function load(): Promise<ServiceRequest[]> {
   try {
+    const store = await cookies().catch(() => undefined);
+    const headers: Record<string, string> = {};
+    const id = store?.get('x-user-id')?.value;
+    const role = store?.get('x-user-role')?.value;
+    const dept = store?.get('x-user-dept')?.value;
+    if (id) headers['x-user-id'] = id;
+    if (role) headers['x-user-role'] = role;
+    if (dept) headers['x-user-dept'] = dept;
     const res = await fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.base}`, {
       cache: 'no-store',
+      headers,
     });
     if (!res.ok) return [];
     return (await res.json()) as ServiceRequest[];

@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
-import { USER_ROLE_HEADER } from '@internal/shared';
+import { USER_ID_HEADER, USER_ROLE_HEADER } from '@internal/shared';
 import {
   TEST_DATABASE_URL,
   cleanupTestDatabase,
@@ -39,7 +39,10 @@ describe('AppController (e2e) [isolated test.db]', () => {
     prisma = app.get(PrismaService);
     // Start clean inside the isolated DB.
     await prisma.auditEntry.deleteMany({}).catch(() => undefined);
+    await prisma.approvalStep.deleteMany({}).catch(() => undefined);
     await prisma.serviceRequest.deleteMany({});
+    await prisma.queue.deleteMany({}).catch(() => undefined);
+    await prisma.user.deleteMany({}).catch(() => undefined);
   }, 60000);
 
   afterAll(async () => {
@@ -343,6 +346,131 @@ describe('AppController (e2e) [isolated test.db]', () => {
   it('Step A: GET audit for non-existent ID returns 404', async () => {
     await request(app.getHttpServer())
       .get('/service-requests/non-existent-id-12345/audit')
+      .expect(404);
+  });
+
+  it('Step B: POST auto-routes to the category queue with owner + backup', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'E2E Routed', category: 'IT' })
+      .expect(201);
+    createdIds.push(res.body.id);
+
+    expect(res.body.queueId).toBeDefined();
+    expect(res.body.ownerId).toBeDefined();
+    expect(res.body.backupOwnerId).toBeDefined();
+    expect(res.body.ownerId).not.toBe(res.body.backupOwnerId);
+
+    const queues = await request(app.getHttpServer())
+      .get('/queues')
+      .expect(200);
+    const itQueue = queues.body.find((q: { category: string }) => q.category === 'IT');
+    expect(itQueue).toBeDefined();
+    expect(res.body.queueId).toBe(itQueue.id);
+  });
+
+  it('Step B: requester isolation — alice sees own, bob does not', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set(USER_ID_HEADER, 'alice@internal.local')
+      .set(USER_ROLE_HEADER, 'requester')
+      .send({ title: 'E2E Alice Own', category: 'HR' })
+      .expect(201);
+    createdIds.push(res.body.id);
+    expect(res.body.requesterId).toBe('alice@internal.local');
+
+    const aliceList = await request(app.getHttpServer())
+      .get('/service-requests')
+      .set(USER_ID_HEADER, 'alice@internal.local')
+      .set(USER_ROLE_HEADER, 'requester')
+      .expect(200);
+    expect(aliceList.body.map((r: { id: string }) => r.id)).toContain(res.body.id);
+
+    const bobList = await request(app.getHttpServer())
+      .get('/service-requests')
+      .set(USER_ID_HEADER, 'bob@internal.local')
+      .set(USER_ROLE_HEADER, 'requester')
+      .expect(200);
+    expect(bobList.body.map((r: { id: string }) => r.id)).not.toContain(res.body.id);
+
+    await request(app.getHttpServer())
+      .get(`/service-requests/${res.body.id}`)
+      .set(USER_ID_HEADER, 'bob@internal.local')
+      .set(USER_ROLE_HEADER, 'requester')
+      .expect(403);
+
+    // Legacy callers without identity keep the old open behavior.
+    const legacyList = await request(app.getHttpServer())
+      .get('/service-requests')
+      .expect(200);
+    expect(legacyList.body.map((r: { id: string }) => r.id)).toContain(res.body.id);
+  });
+
+  it('Step B: department operator is confined to their queue', async () => {
+    const itRes = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'E2E IT Scoped', category: 'IT' })
+      .expect(201);
+    createdIds.push(itRes.body.id);
+    const hrRes = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'E2E HR Scoped', category: 'HR' })
+      .expect(201);
+    createdIds.push(hrRes.body.id);
+
+    const itList = await request(app.getHttpServer())
+      .get('/service-requests')
+      .set(USER_ID_HEADER, 'it.op@internal.local')
+      .set(USER_ROLE_HEADER, 'operator')
+      .set('x-user-dept', 'IT')
+      .expect(200);
+    const ids = itList.body.map((r: { id: string }) => r.id);
+    expect(ids).toContain(itRes.body.id);
+    expect(ids).not.toContain(hrRes.body.id);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${hrRes.body.id}/status`)
+      .set(USER_ID_HEADER, 'it.op@internal.local')
+      .set(USER_ROLE_HEADER, 'operator')
+      .set('x-user-dept', 'IT')
+      .send({ status: 'In Progress' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${itRes.body.id}/status`)
+      .set(USER_ID_HEADER, 'it.op@internal.local')
+      .set(USER_ROLE_HEADER, 'operator')
+      .set('x-user-dept', 'IT')
+      .send({ status: 'In Progress' })
+      .expect(200);
+  });
+
+  it('Step B: GET /queues/:id/requests filters + paginates', async () => {
+    const queues = await request(app.getHttpServer())
+      .get('/queues')
+      .expect(200);
+    expect(queues.body.length).toBeGreaterThanOrEqual(4);
+    const finance = queues.body.find((q: { category: string }) => q.category === 'Finance');
+    expect(finance.openCount).toBeDefined();
+
+    const one = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'E2E Queue Page', category: 'Finance' })
+      .expect(201);
+    createdIds.push(one.body.id);
+
+    const page = await request(app.getHttpServer())
+      .get(`/queues/${finance.id}/requests?status=Submitted&limit=1&page=1`)
+      .expect(200);
+    expect(page.body.total).toBeGreaterThanOrEqual(1);
+    expect(page.body.data.length).toBeLessThanOrEqual(1);
+    expect(page.body.data[0].queueId).toBe(finance.id);
+
+    await request(app.getHttpServer())
+      .get(`/queues/${finance.id}/requests?status=Flying`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/queues/no-such-queue/requests')
       .expect(404);
   });
 });

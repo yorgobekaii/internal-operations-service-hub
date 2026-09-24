@@ -162,6 +162,20 @@ export const SERVICE_REQUEST_ROUTES = {
   aiTriage: '/service-requests/ai-triage',
 } as const;
 
+export const QUEUE_ROUTES = {
+  base: '/queues',
+  byId: (id: string) => `/queues/${id}`,
+  requestsByQueue: (id: string) => `/queues/${id}/requests`,
+} as const;
+
+export const USER_DEPT_HEADER = 'x-user-dept';
+
+export interface RequestActor {
+  userId?: string;
+  role?: string;
+  department?: string;
+}
+
 export const SLA_HOURS: Record<ServiceRequestPriority, number> = {
   Urgent: 4,
   High: 24,
