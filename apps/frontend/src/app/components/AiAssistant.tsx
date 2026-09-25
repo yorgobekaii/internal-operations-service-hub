@@ -1,24 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { createServiceRequest, suggestTriage } from '../actions';
+import { useRouter } from 'next/navigation';
+import { suggestTriage } from '../actions';
 import { categoryBadge, priorityBadge, statusBadge } from './badges';
 import type { AiTriageSuggestion } from '@internal/shared';
 
 export default function AiAssistant() {
+  const router = useRouter();
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<AiTriageSuggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [applied, setApplied] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
 
   async function runSuggest() {
     setLoading(true);
     setError(null);
-    setApplied(false);
-    setDone(null);
     try {
       const res = await suggestTriage(description);
       if (res.error || !res.suggestion) {
@@ -32,25 +29,15 @@ export default function AiAssistant() {
     }
   }
 
-  async function applyAndSubmit() {
+  function applyToForm() {
     if (!suggestion) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const fd = new FormData();
-      fd.set('title', suggestion.title);
-      fd.set('category', suggestion.category);
-      fd.set('priority', suggestion.priority);
-      const res = await createServiceRequest(fd);
-      if (res && 'error' in res && res.error) {
-        setError(typeof res.error === 'string' ? res.error : 'Submit failed.');
-      } else {
-        setDone(`Created “${suggestion.title}” (${suggestion.category} · ${suggestion.priority}).`);
-        setApplied(true);
-      }
-    } finally {
-      setSubmitting(false);
-    }
+    const params = new URLSearchParams({
+      title: suggestion.title,
+      category: suggestion.category,
+      priority: suggestion.priority,
+      description: suggestion.summary,
+    });
+    router.push(`/new?${params.toString()}`);
   }
 
   return (
@@ -92,7 +79,7 @@ export default function AiAssistant() {
           {loading ? 'Drafting…' : '✦ Suggest with AI'}
         </button>
         <span className="text-[11px] text-slate-500">
-          Instant preview · categories IT/HR/Finance/Operations · priorities
+          Instant preview · categories IT/HR/Finance/Operations/Legal · priorities
           Urgent/High/Standard/Low
         </span>
       </div>
@@ -134,24 +121,24 @@ export default function AiAssistant() {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={applyAndSubmit}
-              disabled={submitting || applied}
+              onClick={applyToForm}
               className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950 shadow transition hover:bg-emerald-400 disabled:opacity-40"
             >
-              {submitting ? 'Creating…' : applied ? '✓ Created' : 'Apply & Create Request'}
+              Continue in intake form →
             </button>
             <button
               type="button"
               onClick={() => {
                 setSuggestion(null);
-                setApplied(false);
               }}
               className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/5"
             >
               Discard
             </button>
           </div>
-          {done && <p className="mt-2 text-xs font-medium text-emerald-300">{done}</p>}
+          <p className="mt-2 text-[11px] text-slate-500">
+            Review the draft, fill the {suggestion.category} fields, then submit.
+          </p>
         </div>
       )}
 

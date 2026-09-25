@@ -25,6 +25,7 @@ const CATEGORIES: Array<'All' | ServiceRequestCategory> = [
   'HR',
   'Finance',
   'Operations',
+  'Legal',
 ];
 const STATUSES: Array<'All' | ServiceRequestStatus> = [
   'All',

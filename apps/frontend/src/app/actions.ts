@@ -39,18 +39,30 @@ export async function createServiceRequest(formData: FormData) {
   const title = formData.get('title') as string;
   const category = formData.get('category') as string;
   const priority = (formData.get('priority') as string) || undefined;
+  const description = ((formData.get('description') as string) ?? '').trim() || undefined;
 
   if (!title || !category) {
     return { error: 'Title and category are required' };
   }
 
+  // Schema-agnostic packing: anything beyond the core fields travels in
+  // payloadJson, matching the backend CATEGORY_SCHEMAS contract.
+  const payload: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (['title', 'category', 'priority', 'description'].includes(key)) continue;
+    if (typeof value === 'string' && value.trim().length > 0) payload[key] = value;
+  }
+
+  const body: Record<string, unknown> = { title, category };
+  if (priority) body['priority'] = priority;
+  if (description) body['description'] = description;
+  if (Object.keys(payload).length > 0) body['payloadJson'] = JSON.stringify(payload);
+
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: await identityHeaders(),
-      body: JSON.stringify(
-        priority ? { title, category, priority } : { title, category },
-      ),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {

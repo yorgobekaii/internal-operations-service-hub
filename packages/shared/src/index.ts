@@ -6,7 +6,12 @@ export type ServiceRequestStatus =
   | 'Resolved'
   | 'Declined';
 
-export type ServiceRequestCategory = 'IT' | 'HR' | 'Finance' | 'Operations';
+export type ServiceRequestCategory =
+  | 'IT'
+  | 'HR'
+  | 'Finance'
+  | 'Operations'
+  | 'Legal';
 
 export interface CreateServiceRequestDto {
   title: string;
@@ -126,6 +131,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategory[] = [
   'HR',
   'Finance',
   'Operations',
+  'Legal',
 ];
 
 export const SERVICE_REQUEST_STATUSES: ServiceRequestStatus[] = [
@@ -207,3 +213,64 @@ export const SLA_HOURS: Record<ServiceRequestPriority, number> = {
 };
 
 export const REOPEN_DAYS = 7;
+
+export type CategoryFieldType = 'text' | 'textarea' | 'select';
+
+export interface CategoryField {
+  name: string;
+  label: string;
+  type: CategoryFieldType;
+  required: boolean;
+  /** Where the value lands: top-level description or the payloadJson bag. */
+  mapTo?: 'description' | 'payload';
+  options?: string[];
+  placeholder?: string;
+}
+
+/**
+ * Minimalist per-category intake: the smallest field set that lets the
+ * router triage without follow-up questions. `description` fields land on
+ * the request; everything else lands in payloadJson.
+ */
+export const CATEGORY_SCHEMAS: Record<ServiceRequestCategory, CategoryField[]> = {
+  IT: [
+    { name: 'system', label: 'System / asset', type: 'text', required: true, placeholder: 'e.g. Jira, laptop SN-204' },
+    { name: 'details', label: 'What exactly is wrong?', type: 'textarea', required: false, mapTo: 'description', placeholder: 'Symptoms, error messages, urgency…' },
+  ],
+  HR: [
+    { name: 'topic', label: 'Topic', type: 'select', required: true, options: ['Leave', 'Benefits', 'Conduct', 'Hiring', 'Other'] },
+    { name: 'details', label: 'Details', type: 'textarea', required: false, mapTo: 'description', placeholder: 'Dates, people involved (no sensitive IDs)…' },
+  ],
+  Finance: [
+    { name: 'amount', label: 'Amount', type: 'text', required: true, placeholder: 'e.g. 4500 USD' },
+    { name: 'costCenter', label: 'Cost center', type: 'text', required: true, placeholder: 'e.g. CC-042' },
+    { name: 'details', label: 'Justification', type: 'textarea', required: false, mapTo: 'description', placeholder: 'What is this spend for?' },
+  ],
+  Operations: [
+    { name: 'location', label: 'Location', type: 'text', required: true, placeholder: 'e.g. HQ floor 3' },
+    { name: 'details', label: 'Details', type: 'textarea', required: false, mapTo: 'description', placeholder: 'What do you need?' },
+  ],
+  Legal: [
+    { name: 'reviewType', label: 'Review type', type: 'select', required: true, options: ['Contract', 'Vendor', 'Policy', 'Other'] },
+    { name: 'deadline', label: 'Deadline', type: 'text', required: false, placeholder: 'e.g. 2026-10-15' },
+    { name: 'details', label: 'Background', type: 'textarea', required: false, mapTo: 'description', placeholder: 'Parties, context, links…' },
+  ],
+};
+
+/** Required payloadJson keys for a category (description-mapped fields excluded). */
+export function requiredPayloadFields(category: ServiceRequestCategory): string[] {
+  return (CATEGORY_SCHEMAS[category] ?? [])
+    .filter((f) => f.required && (f.mapTo ?? 'payload') === 'payload')
+    .map((f) => f.name);
+}
+
+/** Names of required fields that are missing or blank in a parsed payload bag. */
+export function missingPayloadFields(
+  category: ServiceRequestCategory,
+  payload: Record<string, unknown>,
+): string[] {
+  return requiredPayloadFields(category).filter((name) => {
+    const v = payload[name];
+    return typeof v !== 'string' || v.trim().length === 0;
+  });
+}

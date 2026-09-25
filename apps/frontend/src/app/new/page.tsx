@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import AiAssistant from '../components/AiAssistant';
 import NewRequestForm from '../components/NewRequestForm';
 
@@ -26,7 +27,9 @@ export default function NewRequestPage() {
         <p className="mt-0.5 text-xs text-slate-500">
           Same contract as the API and curl examples. Priority defaults to Standard.
         </p>
-        <NewRequestForm />
+        <Suspense fallback={<p className="mt-4 text-xs text-slate-500">Loading form…</p>}>
+          <NewRequestForm />
+        </Suspense>
       </section>
     </main>
   );

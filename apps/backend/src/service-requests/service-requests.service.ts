@@ -27,6 +27,7 @@ import type {
   RequestActor,
 } from '@internal/shared';
 import { ALLOWED_TRANSITIONS, OPERATOR_ROLES } from '@internal/shared';
+import { missingPayloadFields } from '@internal/shared';
 
 type Scope =
   | { mode: 'all' }
@@ -35,6 +36,21 @@ type Scope =
 
 function isOperatorRole(role?: string | null): boolean {
   return !!role && (OPERATOR_ROLES as readonly string[]).includes(role);
+}
+
+/** Parse the payloadJson bag; malformed JSON is a 400, not triage debt. */
+function parsePayloadBag(raw?: string | null): Record<string, unknown> {
+  if (raw === undefined || raw === null || raw.trim().length === 0) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BadRequestException('payloadJson must be a valid JSON object.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new BadRequestException('payloadJson must be a valid JSON object.');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 @Injectable()
@@ -113,6 +129,16 @@ export class ServiceRequestsService {
     actor?: RequestActor,
   ): Promise<SharedServiceRequest> {
     const priority = createDto.priority ?? 'Standard';
+    // Minimalist intake rule: every category declares its mandatory
+    // context fields in CATEGORY_SCHEMAS; incomplete intake is refused
+    // with an explicit message instead of creating triage debt.
+    const payload = parsePayloadBag(createDto.payloadJson);
+    const missing = missingPayloadFields(createDto.category, payload);
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Missing required fields for ${createDto.category}: ${missing.join(', ')}.`,
+      );
+    }
     const route = await this.queues.routeForCategory(createDto.category);
     const requesterId = createDto.requesterId ?? actor?.userId ?? null;
     if (actor?.userId) await this.ensureUser(actor);

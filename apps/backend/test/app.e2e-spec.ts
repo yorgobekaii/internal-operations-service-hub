@@ -74,10 +74,36 @@ describe('AppController (e2e) [isolated test.db]', () => {
     await app.close();
   });
 
+  /** Minimal valid category extras (Step E intake contracts). */
+  function extrasFor(category: string): Record<string, string> {
+    switch (category) {
+      case 'IT':
+        return { system: 'Jira' };
+      case 'HR':
+        return { topic: 'Leave' };
+      case 'Finance':
+        return { amount: '100', costCenter: 'CC-1' };
+      case 'Operations':
+        return { location: 'HQ' };
+      case 'Legal':
+        return { reviewType: 'Contract' };
+      default:
+        return {};
+    }
+  }
+
+  function validPayload(title: string, category: string, extra?: Record<string, unknown>) {
+    return {
+      title,
+      category,
+      payloadJson: JSON.stringify({ ...extrasFor(category), ...(extra ?? {}) }),
+    };
+  }
+
   async function createRequest(title = 'E2E Test DB', category = 'Finance') {
     const res = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title, category })
+      .send(validPayload(title, category))
       .expect(201);
     createdIds.push(res.body.id);
     return res;
@@ -307,7 +333,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
   it('Priority persists: POST with priority High returns High', async () => {
     const res = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E Priority', category: 'Finance', priority: 'High' })
+      .send({ ...validPayload('E2E Priority', 'Finance'), priority: 'High' })
       .expect(201);
     createdIds.push(res.body.id);
     expect(res.body.priority).toBe('High');
@@ -316,7 +342,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
   it('Step A: POST creates an audit entry with actor + slaDueAt (backward compat 3-field payload)', async () => {
     const res = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E Audit Create', category: 'IT' })
+      .send(validPayload('E2E Audit Create', 'IT'))
       .expect(201);
     createdIds.push(res.body.id);
     expect(res.body.status).toBe('Submitted');
@@ -367,7 +393,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
   it('Step B: POST auto-routes to the category queue with owner + backup', async () => {
     const res = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E Routed', category: 'IT' })
+      .send(validPayload('E2E Routed', 'IT'))
       .expect(201);
     createdIds.push(res.body.id);
 
@@ -389,7 +415,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .post('/service-requests')
       .set(USER_ID_HEADER, 'alice@internal.local')
       .set(USER_ROLE_HEADER, 'requester')
-      .send({ title: 'E2E Alice Own', category: 'HR' })
+      .send(validPayload('E2E Alice Own', 'HR'))
       .expect(201);
     createdIds.push(res.body.id);
     expect(res.body.requesterId).toBe('alice@internal.local');
@@ -424,12 +450,12 @@ describe('AppController (e2e) [isolated test.db]', () => {
   it('Step B: department operator is confined to their queue', async () => {
     const itRes = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E IT Scoped', category: 'IT' })
+      .send(validPayload('E2E IT Scoped', 'IT'))
       .expect(201);
     createdIds.push(itRes.body.id);
     const hrRes = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E HR Scoped', category: 'HR' })
+      .send(validPayload('E2E HR Scoped', 'HR'))
       .expect(201);
     createdIds.push(hrRes.body.id);
 
@@ -470,7 +496,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
 
     const one = await request(app.getHttpServer())
       .post('/service-requests')
-      .send({ title: 'E2E Queue Page', category: 'Finance' })
+      .send(validPayload('E2E Queue Page', 'Finance'))
       .expect(201);
     createdIds.push(one.body.id);
 
@@ -648,7 +674,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .post('/service-requests')
       .set(USER_ID_HEADER, 'alice@internal.local')
       .set(USER_ROLE_HEADER, 'requester')
-      .send({ title: 'E2E Comments', category: 'HR' })
+      .send(validPayload('E2E Comments', 'HR'))
       .expect(201);
     createdIds.push(postRes.body.id);
     const id = postRes.body.id;
@@ -696,5 +722,53 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .post('/service-requests/non-existent-id-12345/comments')
       .send({ body: 'hello' })
       .expect(404);
+  });
+
+  it('Step E: intake without required category fields is refused with guidance', async () => {
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'Bare IT ask', category: 'IT' })
+      .expect(400)
+      .expect((res) => {
+        const msg = JSON.stringify(res.body.message ?? res.body);
+        if (!msg.includes('system')) throw new Error(`Expected missing-field guidance, got: ${msg}`);
+      });
+
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({
+        title: 'Bare finance ask',
+        category: 'Finance',
+        payloadJson: JSON.stringify({ amount: '50' }),
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .send({ title: 'Broken bag', category: 'IT', payloadJson: '{oops' })
+      .expect(400);
+  });
+
+  it('Step E: Legal intake routes end-to-end with its own queue', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/service-requests')
+      .send(validPayload('Vendor NDA review', 'Legal'))
+      .expect(201);
+    createdIds.push(res.body.id);
+    expect(res.body.category).toBe('Legal');
+    expect(res.body.queueId).toBeDefined();
+    expect(res.body.ownerId).toBeDefined();
+    expect(JSON.parse(res.body.payloadJson)).toMatchObject({ reviewType: 'Contract' });
+
+    const queues = await request(app.getHttpServer()).get('/queues').expect(200);
+    const legal = queues.body.find((q: { category: string }) => q.category === 'Legal');
+    expect(legal).toBeDefined();
+    expect(res.body.queueId).toBe(legal.id);
+
+    const triage = await request(app.getHttpServer())
+      .post('/service-requests/ai-triage')
+      .send({ description: 'Need legal counsel to review a vendor NDA before signing' })
+      .expect(200);
+    expect(triage.body.category).toBe('Legal');
   });
 });

@@ -151,7 +151,7 @@ describe('ServiceRequestsService', () => {
       }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
 
       const result = await service.create(
-        { title: 'Laptop', category: 'IT' },
+        { title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) },
         'tester',
       );
 
@@ -239,7 +239,7 @@ describe('ServiceRequestsService', () => {
         data: Record<string, unknown>;
       }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
 
-      const result = await service.create({ title: 'Laptop', category: 'IT' });
+      const result = await service.create({ title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) });
 
       expect(result.queueId).toBe('queue-it');
       expect(result.ownerId).toBe('owner-it');
@@ -255,7 +255,7 @@ describe('ServiceRequestsService', () => {
       }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
 
       const result = await service.create(
-        { title: 'Laptop', category: 'IT' },
+        { title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) },
         'alice',
         { userId: 'alice@internal.local', role: 'requester' },
       );
@@ -573,6 +573,54 @@ describe('ServiceRequestsService', () => {
       await expect(service.addComment('test-id', { body: '   ' })).rejects.toThrow(
         'Comment body is required.',
       );
+    });
+  });
+
+  describe('Step E: Category intake validation', () => {
+    it('refuses intake missing required category fields', async () => {
+      await expect(
+        service.create({ title: 'Laptop', category: 'IT' }),
+      ).rejects.toThrow('Missing required fields for IT: system.');
+      await expect(
+        service.create({
+          title: 'Bonus',
+          category: 'Finance',
+          payloadJson: JSON.stringify({ amount: '100' }),
+        }),
+      ).rejects.toThrow('Missing required fields for Finance: costCenter.');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses malformed payloadJson', async () => {
+      await expect(
+        service.create({
+          title: 'Laptop',
+          category: 'IT',
+          payloadJson: '{not-json',
+        }),
+      ).rejects.toThrow('payloadJson must be a valid JSON object.');
+      await expect(
+        service.create({
+          title: 'Laptop',
+          category: 'IT',
+          payloadJson: '["system"]',
+        }),
+      ).rejects.toThrow('payloadJson must be a valid JSON object.');
+    });
+
+    it('accepts Legal intake and routes it like any category', async () => {
+      mockTx.serviceRequest.create.mockImplementation(async (args: {
+        data: Record<string, unknown>;
+      }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
+
+      const result = await service.create({
+        title: 'Vendor NDA review',
+        category: 'Legal',
+        payloadJson: JSON.stringify({ reviewType: 'Contract' }),
+      });
+
+      expect(result.category).toBe('Legal');
+      expect(result.queueId).toBeDefined();
     });
   });
 });

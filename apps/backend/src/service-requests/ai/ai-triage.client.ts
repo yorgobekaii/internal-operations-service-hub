@@ -59,21 +59,31 @@ function pickCategory(text: string): {
     'office', 'facilit', 'shipment', 'vendor', 'warehouse', 'operations',
     'meeting room', 'badge', 'desk',
   );
+  const legal = has(
+    'legal', 'contract review', 'nda', 'non-disclosure', 'counsel',
+    'compliance', 'data processing', 'terms of service', 'vendor agreement',
+  );
 
-  const hits = [it, hr, fin, ops].filter(Boolean).length;
+  const hits = [it, hr, fin, ops, legal].filter(Boolean).length;
   if (hits > 1) {
     const strongFinance = ['purchase', 'expense', 'invoice', 'budget', 'procurement', 'reimburs'].some(
       (w) => t.includes(w),
     );
     if (strongFinance && fin) return { category: 'Finance', confidence: 0.78 };
+    const strongLegal = ['contract review', 'nda', 'non-disclosure', 'counsel'].some(
+      (w) => t.includes(w),
+    );
+    if (strongLegal && legal) return { category: 'Legal', confidence: 0.78 };
     if (it) return { category: 'IT', confidence: 0.55 };
     if (fin) return { category: 'Finance', confidence: 0.55 };
     if (hr) return { category: 'HR', confidence: 0.55 };
+    if (legal) return { category: 'Legal', confidence: 0.55 };
     return { category: 'Operations', confidence: 0.55 };
   }
   if (it) return { category: 'IT', confidence: 0.92 };
   if (hr) return { category: 'HR', confidence: 0.9 };
   if (fin) return { category: 'Finance', confidence: 0.9 };
+  if (legal) return { category: 'Legal', confidence: 0.9 };
   if (ops) return { category: 'Operations', confidence: 0.88 };
   return { category: 'Operations', confidence: 0.45 };
 }
@@ -136,9 +146,9 @@ const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 function buildGroqPrompt(description: string): string {
   return [
-    'You are an internal IT/HR/Finance/Operations intake assistant.',
+    'You are an internal IT/HR/Finance/Operations/Legal intake assistant.',
     'Return ONLY valid JSON with keys: category, title, priority, summary, confidence.',
-    'category must be exactly one of: IT, HR, Finance, Operations.',
+    'category must be exactly one of: IT, HR, Finance, Operations, Legal.',
     'priority must be exactly one of: Urgent, High, Standard, Low.',
     'title: <=70 chars, no PII. summary: one sentence. confidence: 0..1 number.',
     `Employee description: """${description.slice(0, 1500)}"""`,
@@ -283,7 +293,7 @@ export function buildAdvisorySuggestion(
   raw: RawTriageCandidate,
   modelVersion: string,
 ): AiTriageSuggestion {
-  const allowedCategories = ['IT', 'HR', 'Finance', 'Operations'];
+  const allowedCategories = ['IT', 'HR', 'Finance', 'Operations', 'Legal'];
   const allowedPriorities = ['Urgent', 'High', 'Standard', 'Low'];
   const category = allowedCategories.includes(raw.category)
     ? (raw.category as ServiceRequestCategory)

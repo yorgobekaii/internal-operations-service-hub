@@ -48,6 +48,8 @@ export function categoryBadge(category: ServiceRequestCategory): string {
       return 'bg-teal-500/15 text-teal-200 border-teal-400/30';
     case 'Operations':
       return 'bg-lime-500/10 text-lime-200 border-lime-400/25';
+    case 'Legal':
+      return 'bg-amber-500/15 text-amber-200 border-amber-400/30';
     default:
       return 'bg-slate-500/15 text-slate-300 border-slate-400/25';
   }

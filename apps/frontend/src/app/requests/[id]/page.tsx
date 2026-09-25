@@ -126,6 +126,33 @@ export default async function RequestDetailPage({
         </section>
       )}
 
+      {(() => {
+        let entries: Array<[string, string]> = [];
+        try {
+          const parsed: unknown = req.payloadJson ? JSON.parse(req.payloadJson) : null;
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            entries = Object.entries(parsed as Record<string, unknown>)
+              .filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
+              .map(([k, v]) => [k, v as string]);
+          }
+        } catch {
+          entries = [];
+        }
+        return entries.length > 0 ? (
+          <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+            <h2 className="text-sm font-bold text-white">Intake details</h2>
+            <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+              {entries.map(([k, v]) => (
+                <div key={k} className="rounded-xl border border-white/10 bg-slate-950/50 p-3">
+                  <dt className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">{k}</dt>
+                  <dd className="mt-0.5 text-sm text-slate-100">{v}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null;
+      })()}
+
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
           <h2 className="text-sm font-bold text-white">Timeline</h2>
