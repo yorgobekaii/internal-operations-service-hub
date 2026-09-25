@@ -191,6 +191,32 @@ export const SERVICE_REQUEST_ROUTES = {
 
 export const APPROVALS_ROUTE = '/approvals';
 
+export const METRICS_ROUTE = '/metrics/queue-health';
+
+export interface QueueHealth {
+  queueId: string | null;
+  category: string;
+  name: string;
+  open: number;
+  breached: number;
+  avgAgeHours: number | null;
+}
+
+export interface QueueHealthReport {
+  generatedAt: string | Date;
+  volume: { total: number; last24h: number };
+  /** Open requests across Submitted / Pending Approval / In Progress / Blocked. */
+  backlog: number;
+  /** Open requests past their slaDueAt. */
+  breachedOpen: number;
+  breachedOpenIds: string[];
+  /** Resolved requests completed after their slaDueAt. */
+  resolvedLate: number;
+  avgQueueAgeHours: number | null;
+  avgCycleHours: number | null;
+  perQueue: QueueHealth[];
+}
+
 export const QUEUE_ROUTES = {
   base: '/queues',
   byId: (id: string) => `/queues/${id}`,
@@ -206,13 +232,11 @@ export interface RequestActor {
 }
 
 export const SLA_HOURS: Record<ServiceRequestPriority, number> = {
-  Urgent: 4,
+  Urgent: 2,
   High: 24,
   Standard: 72,
   Low: 120,
 };
-
-export const REOPEN_DAYS = 7;
 
 export type CategoryFieldType = 'text' | 'textarea' | 'select';
 

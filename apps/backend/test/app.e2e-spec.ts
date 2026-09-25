@@ -771,4 +771,42 @@ describe('AppController (e2e) [isolated test.db]', () => {
       .expect(200);
     expect(triage.body.category).toBe('Legal');
   });
+
+  it('Step F: GET /metrics/queue-health reflects volume, backlog, breaches and cycles', async () => {
+    const open = await createRequest('E2E Metrics Open', 'IT');
+    const cycled = await createRequest('E2E Metrics Cycle', 'HR');
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${cycled.body.id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'In Progress' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${cycled.body.id}/status`)
+      .set(USER_ROLE_HEADER, 'operator')
+      .send({ status: 'Resolved' })
+      .expect(200);
+
+    // Force the open ticket past its SLA directly (deterministic breach).
+    await prisma.serviceRequest.update({
+      where: { id: open.body.id },
+      data: { slaDueAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+
+    const metrics = await request(app.getHttpServer())
+      .get('/metrics/queue-health')
+      .expect(200);
+    expect(metrics.body.backlog).toBeGreaterThanOrEqual(1);
+    expect(metrics.body.breachedOpen).toBeGreaterThanOrEqual(1);
+    expect(metrics.body.breachedOpenIds).toContain(open.body.id);
+    expect(metrics.body.volume.total).toBeGreaterThanOrEqual(2);
+    expect(metrics.body.volume.last24h).toBeGreaterThanOrEqual(2);
+    expect(metrics.body.avgCycleHours).not.toBeNull();
+    expect(Array.isArray(metrics.body.perQueue)).toBe(true);
+    const itQueue = metrics.body.perQueue.find(
+      (q: { category: string }) => q.category === 'IT',
+    );
+    expect(itQueue).toBeDefined();
+    expect(itQueue.open).toBeGreaterThanOrEqual(1);
+  });
 });

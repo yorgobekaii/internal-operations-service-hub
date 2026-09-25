@@ -14,6 +14,7 @@ import {
 } from './dto/decision.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueuesService } from '../queues/queues.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   toContract,
   toAuditContract,
@@ -58,6 +59,7 @@ export class ServiceRequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly queues: QueuesService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -168,6 +170,12 @@ export class ServiceRequestsService {
         },
       });
       return created;
+    });
+    this.notifications.notify('request.created', {
+      requestId: row.id,
+      category: createDto.category,
+      priority,
+      actorId,
     });
     return toContract(row);
   }
@@ -293,6 +301,12 @@ export class ServiceRequestsService {
       });
       return updated;
     });
+    this.notifications.notify('request.status_changed', {
+      requestId: id,
+      from: currentStatus,
+      to: nextStatus,
+      actorId: updateDto.actorId ?? actorId,
+    });
     return toContract(row);
   }
 
@@ -358,6 +372,7 @@ export class ServiceRequestsService {
       });
       return updated;
     });
+    this.notifications.notify('request.approved', { requestId: id, approver });
     return toContract(row);
   }
 
@@ -408,6 +423,7 @@ export class ServiceRequestsService {
       });
       return updated;
     });
+    this.notifications.notify('request.rejected', { requestId: id, approver });
     return toContract(row);
   }
 
@@ -479,6 +495,7 @@ export class ServiceRequestsService {
       });
       return created;
     });
+    this.notifications.notify('request.commented', { requestId: id, author });
     return toCommentContract(row);
   }
 }

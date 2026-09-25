@@ -57,6 +57,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
               <NavLink href="/" label="Dashboard" />
               <NavLink href="/new" label="New Request" />
               <NavLink href="/approvals" label="Approvals" />
+              <NavLink href="/admin" label="Admin" />
             </nav>
             <RoleSwitcher />
           </div>

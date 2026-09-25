@@ -2,6 +2,7 @@
 import { ServiceRequestsService } from './service-requests.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueuesService } from '../queues/queues.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ServiceRequest as PrismaServiceRequest } from '@prisma/client';
 
@@ -107,6 +108,10 @@ describe('ServiceRequestsService', () => {
           useValue: {
             routeForCategory: jest.fn().mockResolvedValue(IT_ROUTE),
           },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notify: jest.fn() },
         },
       ],
     }).compile();

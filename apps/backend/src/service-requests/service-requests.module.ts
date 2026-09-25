@@ -6,9 +6,10 @@ import { AiTriageService } from './ai/ai-triage.service';
 import { createTriageClient } from './ai/ai-triage.client';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QueuesModule } from '../queues/queues.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, QueuesModule],
+  imports: [PrismaModule, QueuesModule, NotificationsModule],
   controllers: [ServiceRequestsController, ApprovalsController],
   providers: [
     ServiceRequestsService,
