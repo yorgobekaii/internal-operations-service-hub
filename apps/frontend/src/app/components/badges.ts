@@ -7,51 +7,51 @@ import type {
 export function statusBadge(status: ServiceRequestStatus): string {
   switch (status) {
     case 'Submitted':
-      return 'bg-sky-500/15 text-sky-300 border-sky-400/30';
+      return 'border-sky-200 bg-sky-50 text-sky-700';
     case 'Pending Approval':
-      return 'bg-violet-500/15 text-violet-300 border-violet-400/30';
+      return 'border-violet-200 bg-violet-50 text-violet-700';
     case 'In Progress':
-      return 'bg-amber-500/15 text-amber-300 border-amber-400/30';
+      return 'border-amber-200 bg-amber-50 text-amber-800';
     case 'Blocked':
-      return 'bg-orange-500/15 text-orange-300 border-orange-400/30';
+      return 'border-orange-200 bg-orange-50 text-orange-800';
     case 'Resolved':
-      return 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30';
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
     case 'Declined':
-      return 'bg-slate-500/15 text-slate-400 border-slate-400/30';
+      return 'border-slate-200 bg-slate-100 text-slate-600';
     default:
-      return 'bg-slate-500/15 text-slate-300 border-slate-400/30';
+      return 'border-slate-200 bg-slate-100 text-slate-600';
   }
 }
 
 export function priorityBadge(priority: ServiceRequestPriority): string {
   switch (priority) {
     case 'Urgent':
-      return 'bg-rose-500/20 text-rose-200 border-rose-400/40';
+      return 'border-rose-200 bg-rose-50 text-rose-700';
     case 'High':
-      return 'bg-orange-500/15 text-orange-200 border-orange-400/30';
+      return 'border-orange-200 bg-orange-50 text-orange-700';
     case 'Standard':
-      return 'bg-slate-500/15 text-slate-300 border-slate-400/25';
+      return 'border-slate-200 bg-slate-100 text-slate-700';
     case 'Low':
-      return 'bg-cyan-500/10 text-cyan-200 border-cyan-400/25';
+      return 'border-cyan-200 bg-cyan-50 text-cyan-700';
     default:
-      return 'bg-slate-500/15 text-slate-300 border-slate-400/25';
+      return 'border-slate-200 bg-slate-100 text-slate-700';
   }
 }
 
 export function categoryBadge(category: ServiceRequestCategory): string {
   switch (category) {
     case 'IT':
-      return 'bg-indigo-500/15 text-indigo-200 border-indigo-400/30';
+      return 'border-indigo-200 bg-indigo-50 text-indigo-700';
     case 'HR':
-      return 'bg-pink-500/15 text-pink-200 border-pink-400/30';
+      return 'border-pink-200 bg-pink-50 text-pink-700';
     case 'Finance':
-      return 'bg-teal-500/15 text-teal-200 border-teal-400/30';
+      return 'border-teal-200 bg-teal-50 text-teal-700';
     case 'Operations':
-      return 'bg-lime-500/10 text-lime-200 border-lime-400/25';
+      return 'border-lime-200 bg-lime-50 text-lime-800';
     case 'Legal':
-      return 'bg-amber-500/15 text-amber-200 border-amber-400/30';
+      return 'border-amber-200 bg-amber-50 text-amber-800';
     default:
-      return 'bg-slate-500/15 text-slate-300 border-slate-400/25';
+      return 'border-slate-200 bg-slate-100 text-slate-700';
   }
 }
 

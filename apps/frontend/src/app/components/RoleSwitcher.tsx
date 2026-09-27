@@ -34,8 +34,12 @@ export default function RoleSwitcher() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setActorId(readCookie(COOKIE) || readCookie('x-user-id'));
-    setReady(true);
+    // Sync teaching-actor identity from the external cookie store after mount.
+    const frame = requestAnimationFrame(() => {
+      setActorId(readCookie(COOKIE) || readCookie('x-user-id'));
+      setReady(true);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   function onSelect(value: string) {
@@ -55,15 +59,15 @@ export default function RoleSwitcher() {
   const current = TEACHING_ACTORS.find((a) => a.id === actorId);
 
   return (
-    <div className="flex items-center gap-2" title="Teaching simulation — backend resolves role from the actor id">
-      <label htmlFor="actor-sim" className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+    <div className="flex flex-wrap items-center gap-2" title="Teaching simulation — backend resolves role from the actor id">
+      <label htmlFor="actor-sim" className="text-[10px] font-semibold uppercase tracking-widest text-indigo-300">
         Viewing as
       </label>
       <select
         id="actor-sim"
         value={actorId}
         onChange={(e) => onSelect(e.target.value)}
-        className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-indigo-400 focus:outline-none"
+        className="min-w-0 flex-1 rounded-lg border border-indigo-700 bg-indigo-900 px-2 py-1.5 text-xs text-white focus:border-blue-400 focus:outline-none"
       >
         <option value="">Select actor…</option>
         {TEACHING_ACTORS.map((a) => (
@@ -73,11 +77,11 @@ export default function RoleSwitcher() {
         ))}
       </select>
       {current ? (
-        <span className="rounded-full border border-indigo-400/30 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">
+        <span className="rounded-full border border-indigo-400 bg-indigo-900 px-2 py-0.5 text-[11px] font-semibold text-indigo-100">
           {current.name} · {current.blurb}
         </span>
       ) : (
-        <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
+        <span className="rounded-full border border-indigo-800 px-2 py-0.5 text-[11px] text-indigo-300">
           No actor — actions return 403
         </span>
       )}
@@ -85,7 +89,7 @@ export default function RoleSwitcher() {
         <button
           type="button"
           onClick={reset}
-          className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:text-white"
+          className="rounded-lg border border-indigo-700 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-900 hover:text-white"
         >
           Reset
         </button>

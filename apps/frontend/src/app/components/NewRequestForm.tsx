@@ -10,9 +10,9 @@ import {
 } from '@internal/shared';
 
 const inputCls =
-  'mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950/70 p-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none';
+  'field-input mt-2 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none';
 const labelCls =
-  'block text-xs font-semibold tracking-wide text-slate-300 uppercase';
+  'block text-xs font-semibold tracking-wide text-slate-700 uppercase';
 
 function isCategory(v: string | null): v is ServiceRequestCategory {
   return (SERVICE_REQUEST_CATEGORIES as string[]).includes(v ?? '');
@@ -97,7 +97,7 @@ export default function NewRequestForm() {
       </div>
 
       {category === '' && (
-        <p className="text-xs text-slate-500 sm:col-span-2">
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 sm:col-span-2">
           Pick a category to see only the fields triage actually needs.
         </p>
       )}
@@ -152,7 +152,10 @@ export default function NewRequestForm() {
       )}
 
       {error && (
-        <p className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-200 sm:col-span-2">
+        <p
+          role="alert"
+          className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 sm:col-span-2"
+        >
           {error}
         </p>
       )}
@@ -160,7 +163,8 @@ export default function NewRequestForm() {
         <button
           type="submit"
           disabled={busy || category === ''}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+          aria-live="polite"
+          className="focus-ring rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
         >
           {busy ? 'Submitting…' : 'Submit request'}
         </button>
