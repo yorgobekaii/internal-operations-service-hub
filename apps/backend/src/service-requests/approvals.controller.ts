@@ -1,28 +1,22 @@
-import { Controller, Get, Headers, Query, Req } from '@nestjs/common';
+import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import { ServiceRequestsService } from './service-requests.service';
-import { actorFromRequest } from './auth.guard';
-import type { RequestActor } from '@internal/shared';
+import { RequireActorGuard, resolvedActorFromRequest } from './auth.guard';
 
 /**
  * Approver work queue: requests currently gated at Pending Approval,
- * scoped to the caller's identity like every other listing.
+ * scoped to the caller's resolved teaching identity. The optional
+ * `approverId` query is intentionally ignored — authority derives from
+ * `x-user-id`, never from client-supplied fields.
  */
 @Controller('approvals')
 export class ApprovalsController {
   constructor(private readonly serviceRequestsService: ServiceRequestsService) {}
 
   @Get()
-  async list(
-    @Query('approverId') approverId: string | undefined,
-    @Headers() headers: Record<string, unknown>,
-    @Req() req: unknown,
-  ) {
-    const scope: RequestActor = req ? actorFromRequest(req) : {};
+  @UseGuards(RequireActorGuard)
+  async list(@Req() req: unknown) {
     return this.serviceRequestsService.findApprovals(
-      scope.userId || scope.role ? scope : undefined,
-      typeof approverId === 'string' && approverId.trim().length > 0
-        ? approverId
-        : undefined,
+      resolvedActorFromRequest(req),
     );
   }
 }

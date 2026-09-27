@@ -6,6 +6,14 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ServiceRequest as PrismaServiceRequest } from '@prisma/client';
 
+const MAYA = { userId: 'maya.requester' };
+const THEO = { userId: 'theo.requester' };
+const OMAR = { userId: 'omar.it-handler' };
+const PRIYA = { userId: 'priya.hr-handler' };
+const LINA = { userId: 'lina.finance-approver' };
+const SAM = { userId: 'sam.legal-approver' };
+const NORA = { userId: 'nora.ops-admin' };
+
 function buildRow(
   overrides: Partial<PrismaServiceRequest> = {},
 ): PrismaServiceRequest {
@@ -45,7 +53,7 @@ describe('ServiceRequestsService', () => {
   let mockTx: {
     serviceRequest: { create: jest.Mock; update: jest.Mock };
     auditEntry: { create: jest.Mock };
-    approvalStep: { create: jest.Mock; findMany: jest.Mock; updateMany: jest.Mock };
+    approvalStep: { create: jest.Mock; findMany: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
     comment: { create: jest.Mock; findMany: jest.Mock };
   };
 
@@ -56,6 +64,7 @@ describe('ServiceRequestsService', () => {
       approvalStep: {
         create: jest.fn().mockResolvedValue({ id: 'step-1' }),
         findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn().mockResolvedValue({ id: 'step-1' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       comment: {
@@ -88,6 +97,7 @@ describe('ServiceRequestsService', () => {
             approvalStep: {
               findMany: jest.fn().mockResolvedValue([]),
               create: jest.fn(),
+              update: jest.fn(),
               updateMany: jest.fn(),
             },
             comment: {
@@ -124,6 +134,24 @@ describe('ServiceRequestsService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('Fail-closed identity', () => {
+    it('rejects missing and unknown actors (no legacy open behavior)', async () => {
+      await expect(service.findAll(undefined)).rejects.toThrow(ForbiddenException);
+      await expect(service.findAll({ userId: 'ghost' })).rejects.toThrow(ForbiddenException);
+      await expect(service.findOne('test-id', undefined)).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.create({ title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) }, undefined),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('ignores client-supplied role/dept and resolves from the registry', async () => {
+      // Spoofed handler claim via unknown id still 403s; unknown ids never resolve.
+      await expect(
+        service.findAll({ userId: 'mallory', role: 'admin', department: 'IT' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
   describe('Business Rule: State Transitions', () => {
     it('1-Business-rule test: should reject invalid state transition from Submitted to Resolved', async () => {
       jest
@@ -131,11 +159,11 @@ describe('ServiceRequestsService', () => {
         .mockResolvedValue(buildRow({ status: 'Submitted' }));
 
       await expect(
-        service.updateStatus('test-id', { status: 'Resolved' }),
+        service.updateStatus('test-id', { status: 'Resolved' }, NORA),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('4-Regression test: should allow valid transition from Submitted to In Progress', async () => {
+    it('4-Regression test: should allow valid transition from Submitted to In Progress (admin)', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(buildRow({ status: 'Submitted' }));
@@ -146,8 +174,20 @@ describe('ServiceRequestsService', () => {
 
       const result = await service.updateStatus('test-id', {
         status: 'In Progress',
-      });
+      }, NORA);
       expect(result.status).toBe('In Progress');
+    });
+
+    it('requester/approver cannot PATCH status (403)', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Submitted', requesterId: 'maya.requester' }));
+      await expect(
+        service.updateStatus('test-id', { status: 'In Progress' }, MAYA),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.updateStatus('test-id', { status: 'In Progress' }, LINA),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('Step A: create writes an audit entry atomically with the request', async () => {
@@ -157,14 +197,14 @@ describe('ServiceRequestsService', () => {
 
       const result = await service.create(
         { title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) },
-        'tester',
+        MAYA,
       );
 
       expect(result.status).toBe('Submitted');
       expect(result.slaDueAt).toBeDefined();
       expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          actorId: 'tester',
+          actorId: 'maya.requester',
           from: null,
           to: 'Submitted',
           action: 'created',
@@ -173,7 +213,7 @@ describe('ServiceRequestsService', () => {
       expect(prisma.$transaction).toHaveBeenCalled();
     });
 
-    it('Step A: updateStatus writes a status_changed audit entry', async () => {
+    it('Step A: updateStatus writes a status_changed audit entry with resolved actor (ignores body actorId)', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(buildRow({ status: 'Submitted' }));
@@ -184,14 +224,14 @@ describe('ServiceRequestsService', () => {
 
       await service.updateStatus(
         'test-id',
-        { status: 'In Progress' },
-        'operator',
+        { status: 'In Progress', actorId: 'mallory' },
+        NORA,
       );
 
       expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           requestId: 'test-id',
-          actorId: 'operator',
+          actorId: 'nora.ops-admin',
           from: 'Submitted',
           to: 'In Progress',
           action: 'status_changed',
@@ -226,7 +266,7 @@ describe('ServiceRequestsService', () => {
         ],
       );
 
-      const trail = await service.getAuditTrail('test-id');
+      const trail = await service.getAuditTrail('test-id', NORA);
 
       expect(trail).toHaveLength(2);
       expect(trail[0].action).toBe('created');
@@ -238,13 +278,13 @@ describe('ServiceRequestsService', () => {
     });
   });
 
-  describe('Step B: Routing', () => {
+  describe('Step B: Routing + server-owned fields', () => {
     it('routes new requests to the category queue with owner + backup', async () => {
       mockTx.serviceRequest.create.mockImplementation(async (args: {
         data: Record<string, unknown>;
       }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
 
-      const result = await service.create({ title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) });
+      const result = await service.create({ title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) }, MAYA);
 
       expect(result.queueId).toBe('queue-it');
       expect(result.ownerId).toBe('owner-it');
@@ -254,77 +294,59 @@ describe('ServiceRequestsService', () => {
       });
     });
 
-    it('records the header identity as requesterId', async () => {
+    it('records the resolved actor as requesterId and ignores spoofed body fields', async () => {
       mockTx.serviceRequest.create.mockImplementation(async (args: {
         data: Record<string, unknown>;
       }) => buildRow({ ...(args.data as object), status: 'Submitted' }));
 
       const result = await service.create(
-        { title: 'Laptop', category: 'IT', payloadJson: JSON.stringify({ system: 'Jira' }) },
-        'alice',
-        { userId: 'alice@internal.local', role: 'requester' },
+        {
+          title: 'Laptop',
+          category: 'IT',
+          payloadJson: JSON.stringify({ system: 'Jira' }),
+          requesterId: 'mallory',
+          queueId: 'evil-queue',
+          ownerId: 'evil-owner',
+        } as never,
+        MAYA,
       );
 
-      expect(result.requesterId).toBe('alice@internal.local');
+      expect(result.requesterId).toBe('maya.requester');
+      expect(result.queueId).toBe('queue-it');
+      expect(result.ownerId).toBe('owner-it');
+      expect(mockTx.serviceRequest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          requesterId: 'maya.requester',
+          queueId: 'queue-it',
+          ownerId: 'owner-it',
+        }),
+      });
     });
   });
 
   describe('Step B: Row-level scoping', () => {
-    it('legacy callers without identity still see everything', async () => {
-      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
-      await service.findAll();
-      expect(findMany).toHaveBeenCalledWith({
-        where: {},
-        orderBy: { createdAt: 'desc' },
-      });
-    });
-
     it('requesters only see their own requests', async () => {
-      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({
-        id: 'u-alice',
-        email: 'alice@internal.local',
-        role: 'requester',
-        department: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
       const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
 
-      await service.findAll({ userId: 'alice@internal.local', role: 'requester' });
+      await service.findAll(MAYA);
 
       expect(findMany).toHaveBeenCalledWith({
-        where: { requesterId: 'alice@internal.local' },
+        where: { requesterId: 'maya.requester' },
         orderBy: { createdAt: 'desc' },
       });
     });
 
-    it('requesters cannot open someone else\u2019s request', async () => {
-      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({
-        id: 'u-alice',
-        email: 'alice@internal.local',
-        role: 'requester',
-        department: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+    it('requesters cannot open someone else’s request', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
-        .mockResolvedValue(buildRow({ requesterId: 'bob@internal.local' }));
+        .mockResolvedValue(buildRow({ requesterId: 'theo.requester' }));
 
       await expect(
-        service.findOne('test-id', { userId: 'alice@internal.local' }),
+        service.findOne('test-id', MAYA),
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('department operators are confined to their queue', async () => {
-      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({
-        id: 'u-op',
-        email: 'op@internal.local',
-        role: 'operator',
-        department: 'IT',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+    it('department handlers are confined to their queue', async () => {
       jest.spyOn(prisma.queue, 'findMany').mockResolvedValue([
         {
           id: 'queue-it',
@@ -338,31 +360,62 @@ describe('ServiceRequestsService', () => {
       ]);
       const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
 
-      await service.findAll({ userId: 'op@internal.local', role: 'operator' });
+      await service.findAll(OMAR);
 
       expect(findMany).toHaveBeenCalledWith({
         where: { queueId: { in: ['queue-it'] } },
         orderBy: { createdAt: 'desc' },
       });
+
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ queueId: 'queue-hr', requesterId: 'x' }));
+      await expect(service.findOne('test-id', OMAR)).rejects.toThrow(ForbiddenException);
     });
 
-    it('admins see everything', async () => {
-      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
-      await service.findAll({ userId: 'root@internal.local', role: 'admin' });
-      expect(findMany).toHaveBeenCalledWith({
-        where: {},
-        orderBy: { createdAt: 'desc' },
-      });
+    it('admins see everything but sensitive payloads are redacted', async () => {
+      jest.spyOn(prisma.serviceRequest, 'findUnique').mockResolvedValue(
+        buildRow({
+          category: 'HR',
+          description: 'secret',
+          payloadJson: JSON.stringify({ topic: 'Leave' }),
+        }),
+      );
+      const got = await service.findOne('test-id', NORA);
+      expect(got.description).toBe('[restricted: sensitive request]');
+      expect(got.payloadJson).toBeNull();
+    });
+
+    it('approvers see only assigned requests', async () => {
+      jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue([]);
+      expect(await service.findAll(LINA)).toEqual([]);
+      jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue([
+        {
+          id: 'step-1',
+          requestId: 'test-id',
+          approverId: 'lina.finance-approver',
+          status: 'pending',
+          rationale: null,
+          decidedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+      jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([
+        buildRow({ status: 'Pending Approval' }),
+      ]);
+      const list = await service.findAll(LINA);
+      expect(list).toHaveLength(1);
     });
   });
 
-  describe('Step C: Approval gate', () => {
+  describe('Step C: Approval gate (designated approver)', () => {
     const pendingRow = () =>
       buildRow({ status: 'Pending Approval', queueId: 'queue-it' });
     const pendingStep = (overrides = {}) => ({
       id: 'step-1',
       requestId: 'test-id',
-      approverId: null,
+      approverId: 'lina.finance-approver',
       status: 'pending',
       rationale: null,
       decidedAt: null,
@@ -371,18 +424,19 @@ describe('ServiceRequestsService', () => {
       ...overrides,
     });
 
-    it('opens a pending approval step when entering Pending Approval', async () => {
+    it('opens a pending approval step assigned to the designated approver', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(buildRow({ status: 'Submitted' }));
       mockTx.serviceRequest.update.mockResolvedValue(pendingRow());
 
-      await service.updateStatus('test-id', { status: 'Pending Approval' });
+      await service.updateStatus('test-id', { status: 'Pending Approval' }, NORA);
 
       expect(mockTx.approvalStep.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           requestId: 'test-id',
           status: 'pending',
+          approverId: 'lina.finance-approver',
         }),
       });
     });
@@ -396,12 +450,12 @@ describe('ServiceRequestsService', () => {
         .mockResolvedValue([pendingStep()]);
 
       await expect(
-        service.updateStatus('test-id', { status: 'In Progress' }),
+        service.updateStatus('test-id', { status: 'In Progress' }, NORA),
       ).rejects.toThrow('Approval required before fulfillment can start');
       expect(mockTx.serviceRequest.update).not.toHaveBeenCalled();
     });
 
-    it('approve() releases to In Progress and records an approved audit', async () => {
+    it('approve() releases to In Progress for the designated approver only', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(pendingRow());
@@ -412,12 +466,12 @@ describe('ServiceRequestsService', () => {
         buildRow({ status: 'In Progress', queueId: 'queue-it' }),
       );
 
-      const result = await service.approve('test-id', {}, 'boss');
+      const result = await service.approve('test-id', {}, LINA);
 
       expect(result.status).toBe('In Progress');
       expect(mockTx.approvalStep.updateMany).toHaveBeenCalledWith({
         where: { requestId: 'test-id', status: 'pending' },
-        data: expect.objectContaining({ status: 'approved', approverId: 'boss' }),
+        data: expect.objectContaining({ status: 'approved', approverId: 'lina.finance-approver' }),
       });
       expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -428,16 +482,30 @@ describe('ServiceRequestsService', () => {
       });
     });
 
+    it('approve() forbids unrelated approver, handler, requester, admin', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(pendingRow());
+      jest
+        .spyOn(prisma.approvalStep, 'findMany')
+        .mockResolvedValue([pendingStep()]);
+
+      await expect(service.approve('test-id', {}, SAM)).rejects.toThrow(ForbiddenException);
+      await expect(service.approve('test-id', {}, OMAR)).rejects.toThrow(ForbiddenException);
+      await expect(service.approve('test-id', {}, MAYA)).rejects.toThrow(ForbiddenException);
+      await expect(service.approve('test-id', {}, NORA)).rejects.toThrow(ForbiddenException);
+    });
+
     it('reject() requires a rationale and declines with a rejected audit', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(pendingRow());
 
-      await expect(service.reject('test-id', { rationale: '' })).rejects.toThrow(
+      await expect(service.reject('test-id', { rationale: '' }, LINA)).rejects.toThrow(
         'A rejection rationale is required.',
       );
       await expect(
-        service.reject('test-id', {} as { rationale: string }),
+        service.reject('test-id', {} as { rationale: string }, LINA),
       ).rejects.toThrow('A rejection rationale is required.');
 
       jest
@@ -450,7 +518,7 @@ describe('ServiceRequestsService', () => {
       const result = await service.reject(
         'test-id',
         { rationale: 'Over budget' },
-        'boss',
+        LINA,
       );
 
       expect(result.status).toBe('Declined');
@@ -475,26 +543,20 @@ describe('ServiceRequestsService', () => {
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(buildRow({ status: 'Submitted' }));
 
-      await expect(service.approve('test-id', {})).rejects.toThrow(
+      await expect(service.approve('test-id', {}, LINA)).rejects.toThrow(
         'Only requests pending approval can be approved',
       );
       await expect(
-        service.reject('test-id', { rationale: 'nope' }),
+        service.reject('test-id', { rationale: 'nope' }, LINA),
       ).rejects.toThrow('Only requests pending approval can be rejected');
     });
 
-    it('findApprovals lists gated requests, filterable by approver', async () => {
-      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany');
-      await service.findApprovals();
-      expect(findMany).toHaveBeenCalledWith({
-        where: { status: 'Pending Approval' },
-        orderBy: { createdAt: 'desc' },
-      });
-
+    it('findApprovals is scoped per role (assigned for approvers)', async () => {
       jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue([
-        pendingStep({ approverId: null }),
+        pendingStep({ approverId: 'lina.finance-approver' }),
       ]);
-      await service.findApprovals(undefined, 'boss@internal.local');
+      const findMany = jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([]);
+      await service.findApprovals(LINA);
       expect(findMany).toHaveBeenCalledWith({
         where: {
           status: 'Pending Approval',
@@ -502,6 +564,9 @@ describe('ServiceRequestsService', () => {
         },
         orderBy: { createdAt: 'desc' },
       });
+
+      jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue([]);
+      await expect(service.findApprovals(SAM)).resolves.toEqual([]);
     });
   });
 
@@ -512,10 +577,10 @@ describe('ServiceRequestsService', () => {
         .mockResolvedValue(buildRow({ status: 'In Progress' }));
 
       await expect(
-        service.updateStatus('test-id', { status: 'Blocked' }),
+        service.updateStatus('test-id', { status: 'Blocked' }, NORA),
       ).rejects.toThrow('A blockage reason is required to block a request.');
       await expect(
-        service.updateStatus('test-id', { status: 'Blocked', blockedReason: '  ' }),
+        service.updateStatus('test-id', { status: 'Blocked', blockedReason: '  ' }, NORA),
       ).rejects.toThrow('A blockage reason is required to block a request.');
       expect(mockTx.serviceRequest.update).not.toHaveBeenCalled();
     });
@@ -531,7 +596,7 @@ describe('ServiceRequestsService', () => {
       const result = await service.updateStatus('test-id', {
         status: 'Blocked',
         blockedReason: '  Waiting on vendor  ',
-      });
+      }, NORA);
 
       expect(result.status).toBe('Blocked');
       expect(result.blockedReason).toBe('Waiting on vendor');
@@ -541,10 +606,10 @@ describe('ServiceRequestsService', () => {
       });
     });
 
-    it('addComment stores the comment and writes a commented audit', async () => {
+    it('addComment stores the comment with resolved author (ignores body authorId)', async () => {
       jest
         .spyOn(prisma.serviceRequest, 'findUnique')
-        .mockResolvedValue(buildRow({ status: 'In Progress' }));
+        .mockResolvedValue(buildRow({ status: 'In Progress', requesterId: 'maya.requester' }));
       mockTx.comment.create.mockImplementation(async (args: {
         data: Record<string, unknown>;
       }) =>
@@ -559,14 +624,14 @@ describe('ServiceRequestsService', () => {
 
       const comment = await service.addComment(
         'test-id',
-        { body: '  Any update?  ' },
-        'requester-alice',
+        { body: '  Any update?  ', authorId: 'mallory' } as never,
+        MAYA,
       );
 
       expect(comment.body).toBe('Any update?');
-      expect(comment.authorId).toBe('requester-alice');
+      expect(comment.authorId).toBe('maya.requester');
       expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ action: 'commented' }),
+        data: expect.objectContaining({ action: 'commented', actorId: 'maya.requester' }),
       });
     });
 
@@ -575,7 +640,7 @@ describe('ServiceRequestsService', () => {
         .spyOn(prisma.serviceRequest, 'findUnique')
         .mockResolvedValue(buildRow({ status: 'In Progress' }));
 
-      await expect(service.addComment('test-id', { body: '   ' })).rejects.toThrow(
+      await expect(service.addComment('test-id', { body: '   ' }, NORA)).rejects.toThrow(
         'Comment body is required.',
       );
     });
@@ -584,14 +649,14 @@ describe('ServiceRequestsService', () => {
   describe('Step E: Category intake validation', () => {
     it('refuses intake missing required category fields', async () => {
       await expect(
-        service.create({ title: 'Laptop', category: 'IT' }),
+        service.create({ title: 'Laptop', category: 'IT' }, MAYA),
       ).rejects.toThrow('Missing required fields for IT: system.');
       await expect(
         service.create({
           title: 'Bonus',
           category: 'Finance',
           payloadJson: JSON.stringify({ amount: '100' }),
-        }),
+        }, MAYA),
       ).rejects.toThrow('Missing required fields for Finance: costCenter.');
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
@@ -602,14 +667,14 @@ describe('ServiceRequestsService', () => {
           title: 'Laptop',
           category: 'IT',
           payloadJson: '{not-json',
-        }),
+        }, MAYA),
       ).rejects.toThrow('payloadJson must be a valid JSON object.');
       await expect(
         service.create({
           title: 'Laptop',
           category: 'IT',
           payloadJson: '["system"]',
-        }),
+        }, MAYA),
       ).rejects.toThrow('payloadJson must be a valid JSON object.');
     });
 
@@ -622,7 +687,7 @@ describe('ServiceRequestsService', () => {
         title: 'Vendor NDA review',
         category: 'Legal',
         payloadJson: JSON.stringify({ reviewType: 'Contract' }),
-      });
+      }, MAYA);
 
       expect(result.category).toBe('Legal');
       expect(result.queueId).toBeDefined();

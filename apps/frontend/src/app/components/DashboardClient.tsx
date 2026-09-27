@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   approveServiceRequest,
@@ -13,6 +13,7 @@ import {
   priorityBadge,
   statusBadge,
 } from './badges';
+import { getTeachingActor } from '@internal/shared';
 import type {
   ServiceRequest,
   ServiceRequestCategory,
@@ -43,6 +44,22 @@ function formatDate(value: string | Date): string {
   return d.toLocaleString();
 }
 
+function slaSignal(slaDueAt: string | Date | null | undefined, status: ServiceRequestStatus): string {
+  if (!slaDueAt) return 'No SLA';
+  if (['Resolved', 'Declined'].includes(status)) return 'Closed';
+  const due = new Date(slaDueAt).getTime();
+  if (Number.isNaN(due)) return 'No SLA';
+  return due < Date.now() ? 'Overdue' : 'On track';
+}
+
+function readActorId(): string {
+  if (typeof document === 'undefined') return '';
+  const match = document.cookie
+    .split('; ')
+    .find((c) => c.startsWith('x-user-id='));
+  return match ? decodeURIComponent(match.split('=').slice(1).join('=')) : '';
+}
+
 export default function DashboardClient({
   initial,
 }: {
@@ -52,6 +69,14 @@ export default function DashboardClient({
   const [status, setStatus] = useState<(typeof STATUSES)[number]>('All');
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [actorId, setActorId] = useState('');
+
+  useEffect(() => {
+    setActorId(readActorId());
+  }, []);
+
+  const teaching = getTeachingActor(actorId);
+  const role = teaching?.role ?? '';
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -63,11 +88,11 @@ export default function DashboardClient({
     });
   }, [initial, category, status, query]);
 
-  async function advance(id: string, next: ServiceRequestStatus | null) {
+  async function advance(id: string, next: ServiceRequestStatus | null, blockedReason?: string) {
     if (!next) return;
     setBusyId(id);
     try {
-      const res = await updateServiceRequestStatus(id, next);
+      const res = await updateServiceRequestStatus(id, next, blockedReason);
       if (res.error) alert(res.error);
     } finally {
       setBusyId(null);
@@ -95,67 +120,58 @@ export default function DashboardClient({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 lg:flex-row lg:items-center">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-800 p-3 sm:flex-row sm:items-center">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search title or ID…"
-          className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none lg:max-w-xs"
+          className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none sm:max-w-xs"
         />
-        <div className="flex flex-wrap gap-1.5">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategory(c)}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                category === c
-                  ? 'border-indigo-400 bg-indigo-500/25 text-white'
-                  : 'border-white/10 bg-white/[0.03] text-slate-400 hover:text-white'
-              }`}
-            >
-              {c}
-            </button>
-          ))}
+        <div className="flex gap-2">
+          <label className="sr-only" htmlFor="filter-category">Category</label>
+          <select
+            id="filter-category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value as typeof category)}
+            className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-2 text-sm text-slate-100 focus:border-indigo-400 focus:outline-none"
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c === 'All' ? 'All categories' : c}</option>
+            ))}
+          </select>
+          <label className="sr-only" htmlFor="filter-status">Status</label>
+          <select
+            id="filter-status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value as typeof status)}
+            className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-2 text-sm text-slate-100 focus:border-indigo-400 focus:outline-none"
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+            ))}
+          </select>
         </div>
-        <div className="flex flex-wrap gap-1.5 lg:ml-auto">
-          {STATUSES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatus(s)}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                status === s
-                  ? 'border-cyan-300 bg-cyan-400/20 text-white'
-                  : 'border-white/10 bg-white/[0.03] text-slate-400 hover:text-white'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-slate-400 sm:ml-auto">
+          Showing {filtered.length} of {initial.length}
+        </p>
       </div>
 
-      <p className="text-xs text-slate-500">
-        Showing {filtered.length} of {initial.length} requests
-        {category !== 'All' || status !== 'All' || query ? ' (filtered)' : ''}.
-      </p>
-
       {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+        <div className="rounded-xl border border-dashed border-slate-600 bg-slate-800 p-10 text-center">
           <p className="text-sm font-semibold text-slate-200">No requests match</p>
           <p className="mt-1 text-xs text-slate-500">
-            Adjust filters or create a request with the AI assistant.
+            Adjust filters or create a request. Select an actor above — anonymous views return 403.
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="overflow-hidden rounded-xl border border-slate-700">
           {filtered.map((req) => (
-            <RequestCard
+            <RequestRow
               key={req.id}
               req={req}
               busy={busyId === req.id}
+              role={role}
               onAdvance={advance}
               onApprove={approve}
               onReject={reject}
@@ -167,162 +183,136 @@ export default function DashboardClient({
   );
 }
 
-function RequestCard({
+function RequestRow({
   req,
   busy,
+  role,
   onAdvance,
   onApprove,
   onReject,
 }: {
   req: ServiceRequest;
   busy: boolean;
-  onAdvance: (id: string, next: ServiceRequestStatus | null) => Promise<void>;
+  role: string;
+  onAdvance: (id: string, next: ServiceRequestStatus | null, blockedReason?: string) => Promise<void>;
   onApprove: (id: string) => Promise<void>;
   onReject: (id: string, rationale: string) => Promise<void>;
 }) {
   const action = nextStatusFor(req.status);
   const [rejecting, setRejecting] = useState(false);
   const [rationale, setRationale] = useState('');
+  const [blocking, setBlocking] = useState(false);
+  const [blockedReason, setBlockedReason] = useState('');
+  const sla = slaSignal(req.slaDueAt, req.status);
+
+  const isRequester = role === 'requester';
+  const isHandler = role === 'handler' || role === 'operator';
+  const isApprover = role === 'approver';
+  const isAdmin = role === 'admin';
 
   return (
-              <article
-                className="card-sheen rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-5 shadow-xl shadow-black/20"
-              >
-                <div className="flex flex-wrap gap-1.5">
-                  <span
-                    className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(req.status)}`}
-                  >
-                    {req.status}
-                  </span>
-                  <span
-                    className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${categoryBadge(req.category)}`}
-                  >
-                    {req.category}
-                  </span>
-                  <span
-                    className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityBadge(req.priority ?? 'Standard')}`}
-                  >
-                    {req.priority ?? 'Standard'}
-                  </span>
-                </div>
-                <h3 className="mt-3 text-[15px] font-bold text-white">
-                  <Link href={`/requests/${req.id}`} className="hover:text-indigo-200 hover:underline">
-                    {req.title}
-                  </Link>
-                </h3>
-                {(req.queueId || req.ownerId || req.requesterId) && (
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    {req.category} queue
-                    {req.ownerId ? ` · Owner ${req.ownerId.slice(0, 8)}` : ''}
-                    {req.requesterId ? ` · By ${req.requesterId}` : ''}
-                  </p>
-                )}
-                <p className="mt-1 font-mono text-[11px] text-slate-500">
-                  {req.id.slice(0, 8)} · {formatDate(req.createdAt)}
-                </p>
-                <div className="mt-4 flex items-center justify-between gap-3">
-                  <span className="text-[11px] text-slate-500">
-                    Updated {formatDate(req.updatedAt)} ·{' '}
-                    <Link href={`/requests/${req.id}`} className="font-semibold text-indigo-300 hover:text-indigo-200 hover:underline">
-                      Open →
-                    </Link>
-                  </span>
-                  {req.status === 'Submitted' ? (
-                    <span className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onAdvance(req.id, 'In Progress')}
-                        className={`rounded-xl px-3 py-1.5 text-xs font-bold shadow transition disabled:opacity-50 ${action.classes}`}
-                      >
-                        {busy ? 'Working…' : action.label}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onAdvance(req.id, 'Pending Approval')}
-                        title="Route this request through approval before work starts"
-                        className="rounded-xl border border-violet-400/40 px-3 py-1.5 text-xs font-bold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
-                      >
-                        Request approval
-                      </button>
-                    </span>
-                  ) : req.status === 'Pending Approval' ? (
-                    <span className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onApprove(req.id)}
-                        className="rounded-xl bg-violet-500 px-3 py-1.5 text-xs font-bold text-white shadow transition hover:bg-violet-400 disabled:opacity-50"
-                      >
-                        {busy ? 'Working…' : 'Approve'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setRejecting((v) => !v)}
-                        className="rounded-xl border border-rose-400/40 px-3 py-1.5 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-50"
-                      >
-                        Reject
-                      </button>
-                    </span>
-                  ) : action.next ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onAdvance(req.id, action.next)}
-                      className={`rounded-xl px-3 py-1.5 text-xs font-bold shadow transition disabled:opacity-50 ${action.classes}`}
-                    >
-                      {busy ? 'Working…' : action.label}
-                    </button>
-                  ) : req.status === 'Resolved' ? (
-                    <span className="text-xs font-bold text-emerald-300">✓ Completed</span>
-                  ) : (
-                    <span className="text-xs font-medium text-slate-500">Declined</span>
-                  )}
-                </div>
-                {rejecting && req.status === 'Pending Approval' && (
-                  <form
-                    className="mt-3 space-y-2 rounded-xl border border-rose-400/30 bg-rose-500/5 p-3"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void onReject(req.id, rationale).then(() => {
-                        setRejecting(false);
-                        setRationale('');
-                      });
-                    }}
-                  >
-                    <label className="block text-[11px] font-semibold text-rose-200">
-                      Rejection rationale (required)
-                    </label>
-                    <textarea
-                      value={rationale}
-                      onChange={(e) => setRationale(e.target.value)}
-                      rows={2}
-                      placeholder="Why is this being declined?"
-                      className="w-full rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-rose-400 focus:outline-none"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        disabled={busy || rationale.trim().length === 0}
-                        className="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-400 disabled:opacity-50"
-                      >
-                        {busy ? 'Working…' : 'Confirm reject'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRejecting(false);
-                          setRationale('');
-                        }}
-                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:text-white"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </article>
+    <article className="border-b border-slate-700 bg-slate-800 p-4 last:border-0">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(req.status)}`}>
+          {req.status}
+        </span>
+        <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${categoryBadge(req.category)}`}>
+          {req.category}
+        </span>
+        <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${priorityBadge(req.priority ?? 'Standard')}`}>
+          {req.priority ?? 'Standard'}
+        </span>
+        <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sla === 'Overdue' ? 'border-red-400/40 bg-red-500/10 text-red-200' : 'border-slate-600 text-slate-300'}`}>
+          {sla}
+        </span>
+      </div>
+      <h3 className="mt-2 text-[15px] font-semibold text-white">
+        <Link href={`/requests/${req.id}`} className="hover:text-indigo-300 hover:underline">
+          {req.title}
+        </Link>
+      </h3>
+      <p className="mt-1 text-xs text-slate-400">
+        {req.category} queue
+        {req.ownerId ? ` · handler assigned` : ' · unassigned'}
+        {req.requesterId ? ` · by ${req.requesterId}` : ''}
+        {` · updated ${formatDate(req.updatedAt)}`}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Link href={`/requests/${req.id}`} className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 hover:underline">
+          Open →
+        </Link>
+        <span className="ml-auto flex flex-wrap gap-2">
+          {!role && <span className="text-xs text-slate-500">Select an actor to act (403 without identity)</span>}
+          {isRequester && <span className="text-xs text-slate-500">Track status · comment on detail page</span>}
+          {isAdmin && <span className="text-xs text-slate-500">Admin view · workflow via handlers</span>}
+          {isHandler && req.status === 'Submitted' && (
+            <>
+              <button type="button" disabled={busy} onClick={() => onAdvance(req.id, 'In Progress')} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
+                {busy ? 'Working…' : 'Start work'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => onAdvance(req.id, 'Pending Approval')} title="Route through approval" className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+                Request approval
+              </button>
+            </>
+          )}
+          {isHandler && req.status === 'In Progress' && (
+            <>
+              <button type="button" disabled={busy} onClick={() => onAdvance(req.id, 'Resolved')} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{busy ? 'Working…' : 'Resolve'}</button>
+              <button type="button" disabled={busy} onClick={() => setBlocking((v) => !v)} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50">Block</button>
+            </>
+          )}
+          {isHandler && req.status === 'Blocked' && action.next && (
+            <button type="button" disabled={busy} onClick={() => onAdvance(req.id, action.next)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
+              {busy ? 'Working…' : action.label}
+            </button>
+          )}
+          {isApprover && req.status === 'Pending Approval' && (
+            <>
+              <button type="button" disabled={busy} onClick={() => onApprove(req.id)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
+                {busy ? 'Working…' : 'Approve'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => setRejecting((v) => !v)} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+                Reject
+              </button>
+            </>
+          )}
+          {isApprover && req.status !== 'Pending Approval' && (
+            <span className="text-xs text-slate-500">Approvals act only on Pending Approval</span>
+          )}
+          {req.status === 'Resolved' && (
+            <span className="text-xs font-semibold text-emerald-300">Completed</span>
+          )}
+          {req.status === 'Declined' && (
+            <span className="text-xs text-slate-500">Declined</span>
+          )}
+        </span>
+      </div>
+      {rejecting && req.status === 'Pending Approval' && (
+        <form
+          className="mt-3 space-y-2 rounded-lg border border-slate-600 bg-slate-900 p-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void onReject(req.id, rationale).then(() => {
+              setRejecting(false);
+              setRationale('');
+            });
+          }}
+        >
+          <label className="block text-[11px] font-semibold text-slate-300">Rejection rationale (required)</label>
+          <textarea value={rationale} onChange={(e) => setRationale(e.target.value)} rows={2} placeholder="Why is this being declined?" className="w-full rounded-lg border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" />
+          <div className="flex gap-2">
+            <button type="submit" disabled={busy || rationale.trim().length === 0} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{busy ? 'Working…' : 'Confirm reject'}</button>
+            <button type="button" onClick={() => { setRejecting(false); setRationale(''); }} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
+          </div>
+        </form>
+      )}
+      {blocking && req.status === 'In Progress' && (
+        <form className="mt-3 space-y-2 rounded-lg border border-slate-600 bg-slate-900 p-3" onSubmit={(event) => { event.preventDefault(); void onAdvance(req.id, 'Blocked', blockedReason).then(() => { setBlocking(false); setBlockedReason(''); }); }}>
+          <label className="block text-[11px] font-semibold text-slate-300">Blockage reason (required)</label>
+          <textarea value={blockedReason} onChange={(event) => setBlockedReason(event.target.value)} rows={2} placeholder="What is preventing progress?" className="w-full rounded-lg border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" />
+          <div className="flex gap-2"><button type="submit" disabled={busy || blockedReason.trim().length === 0} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Confirm block</button><button type="button" onClick={() => { setBlocking(false); setBlockedReason(''); }} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button></div>
+        </form>
+      )}
+    </article>
   );
 }

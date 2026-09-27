@@ -1,4 +1,4 @@
-﻿import { Controller, Post, Body, Param, Patch, Get, UseGuards, HttpCode, Headers, Req } from '@nestjs/common';
+﻿import { Controller, Post, Body, Param, Patch, Get, UseGuards, HttpCode, Req } from '@nestjs/common';
 import { ServiceRequestsService } from './service-requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
@@ -9,43 +9,12 @@ import {
 } from './dto/decision.dto';
 import { AiTriageRequestDto } from './dto/ai-triage-request.dto';
 import { AiTriageService } from './ai/ai-triage.service';
-import { AuthGuard, actorFromRequest } from './auth.guard';
 import {
-  USER_ID_HEADER,
-  USER_ROLE_HEADER,
-  type RequestActor,
-} from '@internal/shared';
-
-function resolveActor(headers: Record<string, unknown>): string {
-  const fromId =
-    headers?.[USER_ID_HEADER] ?? (headers as Record<string, unknown>)?.['x-user-id'];
-  if (typeof fromId === 'string' && fromId.trim().length > 0) return fromId;
-  const fromRole =
-    headers?.[USER_ROLE_HEADER] ?? (headers as Record<string, unknown>)?.['x-user-role'];
-  if (typeof fromRole === 'string' && fromRole.trim().length > 0)
-    return fromRole;
-  return 'system';
-}
-
-function resolveScope(
-  headers: Record<string, unknown>,
-  req?: unknown,
-): RequestActor {
-  if (req) return actorFromRequest(req);
-  const h = headers ?? {};
-  const pick = (...names: string[]): string | undefined => {
-    for (const n of names) {
-      const v = h[n];
-      if (typeof v === 'string' && v.trim().length > 0) return v;
-    }
-    return undefined;
-  };
-  return {
-    userId: pick(USER_ID_HEADER, 'x-user-id'),
-    role: pick(USER_ROLE_HEADER, 'x-user-role'),
-    department: pick('x-user-dept'),
-  };
-}
+  RequireActorGuard,
+  RequireApproverGuard,
+  RequireHandlerGuard,
+  resolvedActorFromRequest,
+} from './auth.guard';
 
 @Controller('service-requests')
 export class ServiceRequestsController {
@@ -61,129 +30,101 @@ export class ServiceRequestsController {
   }
 
   @Post()
+  @UseGuards(RequireActorGuard)
   async create(
     @Body() createServiceRequestDto: CreateServiceRequestDto,
-    @Headers() headers: Record<string, unknown>,
     @Req() req: unknown,
   ) {
-    const scope = resolveScope(headers ?? {}, req);
-    return this.serviceRequestsService.create(
-      createServiceRequestDto,
-      resolveActor(headers ?? {}),
-      scope.userId ? scope : undefined,
-    );
+    const actor = resolvedActorFromRequest(req);
+    return this.serviceRequestsService.create(createServiceRequestDto, actor);
   }
 
   @Get()
-  async findAll(
-    @Headers() headers: Record<string, unknown>,
-    @Req() req: unknown,
-  ) {
-    return this.serviceRequestsService.findAll(
-      resolveScope(headers ?? {}, req),
-    );
+  @UseGuards(RequireActorGuard)
+  async findAll(@Req() req: unknown) {
+    return this.serviceRequestsService.findAll(resolvedActorFromRequest(req));
   }
 
   @Get(':id/audit')
-  async getAudit(
-    @Param('id') id: string,
-    @Headers() headers: Record<string, unknown>,
-    @Req() req: unknown,
-  ) {
+  @UseGuards(RequireActorGuard)
+  async getAudit(@Param('id') id: string, @Req() req: unknown) {
     return this.serviceRequestsService.getAuditTrail(
       id,
-      resolveScope(headers ?? {}, req),
+      resolvedActorFromRequest(req),
     );
   }
 
   @Get(':id/comments')
-  async listComments(
-    @Param('id') id: string,
-    @Headers() headers: Record<string, unknown>,
-    @Req() req: unknown,
-  ) {
+  @UseGuards(RequireActorGuard)
+  async listComments(@Param('id') id: string, @Req() req: unknown) {
     return this.serviceRequestsService.listComments(
       id,
-      resolveScope(headers ?? {}, req),
+      resolvedActorFromRequest(req),
     );
   }
 
   @Post(':id/comments')
+  @UseGuards(RequireActorGuard)
   async addComment(
     @Param('id') id: string,
     @Body() dto: CreateCommentDto,
-    @Headers() headers: Record<string, unknown>,
     @Req() req: unknown,
   ) {
-    const scope = resolveScope(headers ?? {}, req);
     return this.serviceRequestsService.addComment(
       id,
       dto ?? {},
-      resolveActor(headers ?? {}),
-      scope.userId ? scope : undefined,
+      resolvedActorFromRequest(req),
     );
   }
 
   @Get(':id')
-  async findOne(
-    @Param('id') id: string,
-    @Headers() headers: Record<string, unknown>,
-    @Req() req: unknown,
-  ) {
+  @UseGuards(RequireActorGuard)
+  async findOne(@Param('id') id: string, @Req() req: unknown) {
     return this.serviceRequestsService.findOne(
       id,
-      resolveScope(headers ?? {}, req),
+      resolvedActorFromRequest(req),
     );
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard)
+  @UseGuards(RequireHandlerGuard)
   async updateStatus(
     @Param('id') id: string,
     @Body() updateServiceRequestStatusDto: UpdateServiceRequestStatusDto,
-    @Headers() headers: Record<string, unknown>,
     @Req() req: unknown,
   ) {
-    const scope = resolveScope(headers ?? {}, req);
     return this.serviceRequestsService.updateStatus(
       id,
       updateServiceRequestStatusDto,
-      resolveActor(headers ?? {}),
-      scope.userId ? scope : undefined,
+      resolvedActorFromRequest(req),
     );
   }
 
   @Post(':id/approve')
-  @UseGuards(AuthGuard)
+  @UseGuards(RequireApproverGuard)
   async approve(
     @Param('id') id: string,
     @Body() dto: ApproveServiceRequestDto,
-    @Headers() headers: Record<string, unknown>,
     @Req() req: unknown,
   ) {
-    const scope = resolveScope(headers ?? {}, req);
     return this.serviceRequestsService.approve(
       id,
       dto ?? {},
-      resolveActor(headers ?? {}),
-      scope.userId ? scope : undefined,
+      resolvedActorFromRequest(req),
     );
   }
 
   @Post(':id/reject')
-  @UseGuards(AuthGuard)
+  @UseGuards(RequireApproverGuard)
   async reject(
     @Param('id') id: string,
     @Body() dto: RejectServiceRequestDto,
-    @Headers() headers: Record<string, unknown>,
     @Req() req: unknown,
   ) {
-    const scope = resolveScope(headers ?? {}, req);
     return this.serviceRequestsService.reject(
       id,
       dto ?? {},
-      resolveActor(headers ?? {}),
-      scope.userId ? scope : undefined,
+      resolvedActorFromRequest(req),
     );
   }
 }

@@ -26,17 +26,30 @@ import type {
   AuditEntry as SharedAuditEntry,
   Comment as SharedComment,
   RequestActor,
+  ResolvedActor,
 } from '@internal/shared';
-import { ALLOWED_TRANSITIONS, OPERATOR_ROLES } from '@internal/shared';
+import {
+  ALLOWED_TRANSITIONS,
+  SENSITIVE_CATEGORIES,
+  approverForCategory,
+  isAdminRole,
+  isApproverRole,
+  isHandlerRole,
+  isRequesterRole,
+  resolveTeachingActor,
+} from '@internal/shared';
 import { missingPayloadFields } from '@internal/shared';
 
+type ActorInput = ResolvedActor | RequestActor | undefined;
+
 type Scope =
-  | { mode: 'all' }
   | { mode: 'own'; userId: string }
-  | { mode: 'dept'; userId: string; department: string };
+  | { mode: 'dept'; userId: string; department: string }
+  | { mode: 'assigned'; userId: string }
+  | { mode: 'admin'; userId: string };
 
 function isOperatorRole(role?: string | null): boolean {
-  return !!role && (OPERATOR_ROLES as readonly string[]).includes(role);
+  return isHandlerRole(role) || isAdminRole(role);
 }
 
 /** Parse the payloadJson bag; malformed JSON is a 400, not triage debt. */
@@ -63,73 +76,97 @@ export class ServiceRequestsService {
   ) {}
 
   /**
-   * Dev-stub identity: header-trust model (same as AuthGuard). First sight
-   * of an x-user-id provisions a User row so row-level scoping has
-   * something to key on. Existing rows are never overwritten here.
+   * Single-source actor resolution (fail-closed).
+   * The registry is authoritative: supplied role/department are ignored.
+   * Missing or unknown `x-user-id` => Forbidden (never anonymous/global).
    */
-  private async ensureUser(actor?: RequestActor) {
-    if (!actor?.userId) return null;
-    const existing = await this.prisma.user.findUnique({
-      where: { email: actor.userId },
-    });
-    if (existing) return existing;
-    return this.prisma.user.create({
-      data: {
-        email: actor.userId,
-        role: actor.role ?? 'requester',
-        department: actor.department ?? null,
-      },
-    });
+  private requireResolved(actor?: ActorInput): ResolvedActor {
+    const userId = (actor as { userId?: string } | undefined)?.userId;
+    const resolved = resolveTeachingActor(
+      typeof userId === 'string' ? userId : undefined,
+    );
+    if (!resolved) {
+      throw new ForbiddenException('Forbidden: unknown or missing actor');
+    }
+    return resolved;
   }
 
-  private async resolveScope(actor?: RequestActor): Promise<Scope> {
-    if (!actor?.userId) return { mode: 'all' };
-    if (actor.role === 'admin') return { mode: 'all' };
-    const user = await this.ensureUser(actor);
-    const role = user?.role ?? actor.role ?? 'requester';
-    if (role === 'admin') return { mode: 'all' };
-    if (isOperatorRole(role)) {
-      const department = user?.department ?? actor.department;
-      if (!department) return { mode: 'all' };
-      return { mode: 'dept', userId: actor.userId, department };
+  private async resolveScope(actor?: ActorInput): Promise<Scope> {
+    const resolved = this.requireResolved(actor);
+    if (isAdminRole(resolved.role)) return { mode: 'admin', userId: resolved.userId };
+    if (isHandlerRole(resolved.role)) {
+      // Handlers without a department see nothing (fail-closed, no global fallback).
+      return { mode: 'dept', userId: resolved.userId, department: resolved.department ?? '' };
     }
-    return { mode: 'own', userId: actor.userId };
+    if (isApproverRole(resolved.role)) {
+      return { mode: 'assigned', userId: resolved.userId };
+    }
+    // Requester (default).
+    if (isRequesterRole(resolved.role) || !resolved.role) {
+      return { mode: 'own', userId: resolved.userId };
+    }
+    throw new ForbiddenException('Forbidden: unknown role');
   }
 
   private async deptQueueIds(department: string): Promise<string[]> {
+    if (!department) return [];
     const queues = await this.prisma.queue.findMany({
       where: { category: department },
     });
     return queues.map((q) => q.id);
   }
 
-  private buildWhere(scope: Scope): Record<string, unknown> {
-    if (scope.mode === 'own') return { requesterId: scope.userId };
-    return {};
+  private async assignedRequestIds(userId: string, onlyPending: boolean): Promise<string[]> {
+    const steps = await this.prisma.approvalStep.findMany({
+      where: onlyPending
+        ? { approverId: userId, status: 'pending' }
+        : { approverId: userId },
+    });
+    return [...new Set(steps.map((s) => s.requestId))];
+  }
+
+  private redactForAdmin<T extends { category: string }>(row: T, scope: Scope): T {
+    if (scope.mode !== 'admin') return row;
+    if (!(SENSITIVE_CATEGORIES as string[]).includes(row.category)) return row;
+    return {
+      ...row,
+      description: '[restricted: sensitive request]',
+      payloadJson: null,
+    };
   }
 
   private async enforceScope(
     request: { id: string; requesterId: string | null; queueId: string | null },
     scope: Scope,
   ): Promise<void> {
-    if (scope.mode === 'all') return;
+    if (scope.mode === 'admin') return;
     if (scope.mode === 'own') {
       if (request.requesterId !== scope.userId) {
         throw new ForbiddenException('Forbidden: not your request');
       }
       return;
     }
-    const allowed = await this.deptQueueIds(scope.department);
-    if (!request.queueId || !allowed.includes(request.queueId)) {
-      throw new ForbiddenException('Forbidden: outside your department queue');
+    if (scope.mode === 'dept') {
+      const allowed = await this.deptQueueIds(scope.department);
+      if (!request.queueId || !allowed.includes(request.queueId)) {
+        throw new ForbiddenException('Forbidden: outside your department queue');
+      }
+      return;
+    }
+    // Approver: any step ever assigned to this actor for this request.
+    const steps = await this.prisma.approvalStep.findMany({
+      where: { requestId: request.id, approverId: scope.userId },
+    });
+    if (steps.length === 0) {
+      throw new ForbiddenException('Forbidden: not your approval');
     }
   }
 
   async create(
     createDto: CreateServiceRequestDto,
-    actorId = 'system',
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedServiceRequest> {
+    const resolved = this.requireResolved(actor);
     const priority = createDto.priority ?? 'Standard';
     // Minimalist intake rule: every category declares its mandatory
     // context fields in CATEGORY_SCHEMAS; incomplete intake is refused
@@ -142,8 +179,9 @@ export class ServiceRequestsService {
       );
     }
     const route = await this.queues.routeForCategory(createDto.category);
-    const requesterId = createDto.requesterId ?? actor?.userId ?? null;
-    if (actor?.userId) await this.ensureUser(actor);
+    // Server-owned fields: ignore client requesterId/queueId/ownerId entirely.
+    const requesterId = resolved.userId;
+    const actorId = resolved.userId;
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.serviceRequest.create({
         data: {
@@ -153,8 +191,8 @@ export class ServiceRequestsService {
           priority,
           description: createDto.description ?? null,
           requesterId,
-          queueId: createDto.queueId ?? route.id,
-          ownerId: createDto.ownerId ?? route.ownerId,
+          queueId: route.id,
+          ownerId: route.ownerId,
           backupOwnerId: route.backupOwnerId,
           payloadJson: createDto.payloadJson ?? null,
           slaDueAt: computeSlaDueAt(priority),
@@ -180,24 +218,41 @@ export class ServiceRequestsService {
     return toContract(row);
   }
 
-  async findAll(actor?: RequestActor): Promise<SharedServiceRequest[]> {
+  async findAll(actor?: ActorInput): Promise<SharedServiceRequest[]> {
     const scope = await this.resolveScope(actor);
     if (scope.mode === 'dept') {
       const ids = await this.deptQueueIds(scope.department);
+      if (ids.length === 0) return [];
       const rows = await this.prisma.serviceRequest.findMany({
         where: { queueId: { in: ids } },
         orderBy: { createdAt: 'desc' },
       });
       return rows.map(toContract);
     }
+    if (scope.mode === 'assigned') {
+      const ids = await this.assignedRequestIds(scope.userId, false);
+      if (ids.length === 0) return [];
+      const rows = await this.prisma.serviceRequest.findMany({
+        where: { id: { in: ids } },
+        orderBy: { createdAt: 'desc' },
+      });
+      return rows.map(toContract);
+    }
+    if (scope.mode === 'admin') {
+      const rows = await this.prisma.serviceRequest.findMany({
+        orderBy: { createdAt: 'desc' },
+      });
+      return rows.map((r) => this.redactForAdmin(toContract(r), scope));
+    }
     const rows = await this.prisma.serviceRequest.findMany({
-      where: this.buildWhere(scope) as never,
+      where: { requesterId: scope.userId },
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(toContract);
   }
 
-  async findOne(id: string, actor?: RequestActor): Promise<SharedServiceRequest> {
+  async findOne(id: string, actor?: ActorInput): Promise<SharedServiceRequest> {
+    const scope = await this.resolveScope(actor);
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
     });
@@ -205,18 +260,21 @@ export class ServiceRequestsService {
     if (!request) {
       throw new NotFoundException(`ServiceRequest with ID ${id} not found`);
     }
-    const scope = await this.resolveScope(actor);
     await this.enforceScope(request, scope);
-    return toContract(request);
+    return this.redactForAdmin(toContract(request), scope);
   }
 
   async updateStatus(
     id: string,
     updateDto: UpdateServiceRequestStatusDto,
-    actorId = 'system',
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedServiceRequest> {
-    const request = await this.findOne(id, actor);
+    const resolved = this.requireResolved(actor);
+    // Capability boundary: only handler/admin may transition (guard + service).
+    if (!isOperatorRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: handler role required');
+    }
+    const request = await this.findOne(id, resolved);
     const currentStatus = request.status;
     const nextStatus = updateDto.status;
 
@@ -262,21 +320,33 @@ export class ServiceRequestsService {
       data['blockedReason'] = null;
     }
 
+    // Server-owned audit identity: ignore updateDto.actorId entirely.
+    const actorId = resolved.userId;
     const row = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.serviceRequest.update({
         where: { id },
         data: data as never,
       });
-      // Entering the gate opens a pending approval step (unassigned: any
-      // operator/admin may decide until Step D introduces named approvers).
+      // Entering the gate opens a pending approval step assigned to the
+      // designated teaching approver for the request category.
       if (nextStatus === 'Pending Approval') {
+        const designated = approverForCategory(request.category);
         const open = await tx.approvalStep.findMany({
           where: { requestId: id, status: 'pending' },
         });
         if (open.length === 0) {
           await tx.approvalStep.create({
-            data: { requestId: id, approverId: null, status: 'pending' },
+            data: { requestId: id, approverId: designated, status: 'pending' },
           });
+        } else {
+          // Migrate legacy unassigned steps to the designated approver.
+          const unassigned = open.filter((s) => !s.approverId);
+          for (const step of unassigned) {
+            await tx.approvalStep.update({
+              where: { id: step.id },
+              data: { approverId: designated },
+            });
+          }
         }
       }
       // Aborting out of the gate closes open steps as rejected.
@@ -285,7 +355,7 @@ export class ServiceRequestsService {
           where: { requestId: id, status: 'pending' },
           data: {
             status: 'rejected',
-            approverId: updateDto.actorId ?? actorId,
+            approverId: actorId,
             decidedAt: new Date(),
           },
         });
@@ -293,7 +363,7 @@ export class ServiceRequestsService {
       await tx.auditEntry.create({
         data: {
           requestId: id,
-          actorId: updateDto.actorId ?? actorId,
+          actorId,
           from: currentStatus,
           to: nextStatus,
           action: 'status_changed',
@@ -305,14 +375,14 @@ export class ServiceRequestsService {
       requestId: id,
       from: currentStatus,
       to: nextStatus,
-      actorId: updateDto.actorId ?? actorId,
+      actorId,
     });
-    return toContract(row);
+    return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
   }
 
   async getAuditTrail(
     id: string,
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedAuditEntry[]> {
     await this.findOne(id, actor);
     const rows = await this.prisma.auditEntry.findMany({
@@ -328,25 +398,50 @@ export class ServiceRequestsService {
     });
   }
 
+  /** Ensure legacy null steps are migrated to the designated approver. */
+  private async designatedApproverFor(requestId: string, category: string): Promise<string> {
+    const designated = approverForCategory(category);
+    const open = await this.openApprovalSteps(requestId);
+    const unassigned = open.filter((s) => !s.approverId);
+    if (unassigned.length > 0) {
+      await this.prisma.approvalStep.updateMany({
+        where: { requestId, status: 'pending', approverId: null },
+        data: { approverId: designated },
+      });
+    }
+    return designated;
+  }
+
   async approve(
     id: string,
     dto: ApproveServiceRequestDto,
-    actorId = 'system',
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedServiceRequest> {
-    const request = await this.findOne(id, actor);
-    if (request.status !== 'Pending Approval') {
+    const resolved = this.requireResolved(actor);
+    if (!isApproverRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: approver role required');
+    }
+    // Fetch raw (bypass approver scoping for precise 400/403 ordering).
+    const raw = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!raw) throw new NotFoundException(`ServiceRequest with ID ${id} not found`);
+    if (raw.status !== 'Pending Approval') {
       throw new BadRequestException(
         'Only requests pending approval can be approved',
       );
     }
+    await this.designatedApproverFor(id, raw.category);
     const open = await this.openApprovalSteps(id);
     if (open.length === 0) {
       throw new BadRequestException(
         'No pending approval steps for this request',
       );
     }
-    const approver = dto.approverId ?? actor?.userId ?? actorId;
+    const assignedToMe = open.some((s) => s.approverId === resolved.userId);
+    if (!assignedToMe) {
+      throw new ForbiddenException('Forbidden: not your approval');
+    }
+    // Server-owned approver identity: ignore dto.approverId.
+    const approver = resolved.userId;
     const row = await this.prisma.$transaction(async (tx) => {
       await tx.approvalStep.updateMany({
         where: { requestId: id, status: 'pending' },
@@ -379,25 +474,34 @@ export class ServiceRequestsService {
   async reject(
     id: string,
     dto: RejectServiceRequestDto,
-    actorId = 'system',
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedServiceRequest> {
+    const resolved = this.requireResolved(actor);
+    if (!isApproverRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: approver role required');
+    }
     if (!dto.rationale || dto.rationale.trim().length === 0) {
       throw new BadRequestException('A rejection rationale is required.');
     }
-    const request = await this.findOne(id, actor);
-    if (request.status !== 'Pending Approval') {
+    const raw = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!raw) throw new NotFoundException(`ServiceRequest with ID ${id} not found`);
+    if (raw.status !== 'Pending Approval') {
       throw new BadRequestException(
         'Only requests pending approval can be rejected',
       );
     }
+    await this.designatedApproverFor(id, raw.category);
     const open = await this.openApprovalSteps(id);
     if (open.length === 0) {
       throw new BadRequestException(
         'No pending approval steps for this request',
       );
     }
-    const approver = dto.approverId ?? actor?.userId ?? actorId;
+    const assignedToMe = open.some((s) => s.approverId === resolved.userId);
+    if (!assignedToMe) {
+      throw new ForbiddenException('Forbidden: not your approval');
+    }
+    const approver = resolved.userId;
     const row = await this.prisma.$transaction(async (tx) => {
       await tx.approvalStep.updateMany({
         where: { requestId: id, status: 'pending' },
@@ -427,38 +531,44 @@ export class ServiceRequestsService {
     return toContract(row);
   }
 
-  async findApprovals(
-    actor?: RequestActor,
-    approverId?: string,
-  ): Promise<SharedServiceRequest[]> {
+  async findApprovals(actor?: ActorInput): Promise<SharedServiceRequest[]> {
     const scope = await this.resolveScope(actor);
-    const where: Record<string, unknown> = { status: 'Pending Approval' };
     if (scope.mode === 'own') {
-      where['requesterId'] = scope.userId;
-    } else if (scope.mode === 'dept') {
-      where['queueId'] = { in: await this.deptQueueIds(scope.department) };
-    }
-    if (approverId) {
-      const steps = await this.prisma.approvalStep.findMany({
-        where: {
-          status: 'pending',
-          OR: [{ approverId }, { approverId: null }],
-        },
+      const rows = await this.prisma.serviceRequest.findMany({
+        where: { status: 'Pending Approval', requesterId: scope.userId } as never,
+        orderBy: { createdAt: 'desc' },
       });
-      const ids = [...new Set(steps.map((s) => s.requestId))];
-      if (ids.length === 0) return [];
-      where['id'] = { in: ids };
+      return rows.map(toContract);
     }
+    if (scope.mode === 'dept') {
+      const ids = await this.deptQueueIds(scope.department);
+      if (ids.length === 0) return [];
+      const rows = await this.prisma.serviceRequest.findMany({
+        where: { status: 'Pending Approval', queueId: { in: ids } } as never,
+        orderBy: { createdAt: 'desc' },
+      });
+      return rows.map(toContract);
+    }
+    if (scope.mode === 'assigned') {
+      const ids = await this.assignedRequestIds(scope.userId, true);
+      if (ids.length === 0) return [];
+      const rows = await this.prisma.serviceRequest.findMany({
+        where: { status: 'Pending Approval', id: { in: ids } } as never,
+        orderBy: { createdAt: 'desc' },
+      });
+      return rows.map(toContract);
+    }
+    // Admin: all gated, redacted for sensitive.
     const rows = await this.prisma.serviceRequest.findMany({
-      where: where as never,
+      where: { status: 'Pending Approval' } as never,
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map(toContract);
+    return rows.map((r) => this.redactForAdmin(toContract(r), scope));
   }
 
   async listComments(
     id: string,
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedComment[]> {
     await this.findOne(id, actor);
     const rows = await this.prisma.comment.findMany({
@@ -471,15 +581,16 @@ export class ServiceRequestsService {
   async addComment(
     id: string,
     dto: CreateCommentDto,
-    actorId = 'system',
-    actor?: RequestActor,
+    actor?: ActorInput,
   ): Promise<SharedComment> {
-    await this.findOne(id, actor);
+    const resolved = this.requireResolved(actor);
+    await this.findOne(id, resolved);
     const body = dto.body?.trim();
     if (!body) {
       throw new BadRequestException('Comment body is required.');
     }
-    const author = dto.authorId ?? actor?.userId ?? actorId;
+    // Server-owned author: ignore dto.authorId.
+    const author = resolved.userId;
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.comment.create({
         data: { requestId: id, authorId: author, body },

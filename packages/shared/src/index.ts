@@ -126,6 +126,116 @@ export const USER_ID_HEADER = 'x-user-id';
 export const OPERATOR_ROLES = ['operator', 'admin'] as const;
 export type OperatorRole = (typeof OPERATOR_ROLES)[number];
 
+/**
+ * Teaching identity registry (NOT an auth system).
+ *
+ * The frontend simulation picker sends ONLY `x-user-id`. The backend
+ * resolves role/department/approver assignment from this registry and
+ * rejects absent/unknown actors with 403. Client-supplied
+ * `x-user-role` / `x-user-dept` and body fields (requesterId, approverId,
+ * authorId, actorId, queueId, ownerId) are never trusted.
+ */
+export type TeachingRole = 'requester' | 'handler' | 'approver' | 'admin';
+
+export interface TeachingActor {
+  /** Stable simulation identifier sent as `x-user-id`. */
+  id: string;
+  /** Friendly display name. */
+  name: string;
+  role: TeachingRole;
+  department: string | null;
+  blurb: string;
+}
+
+export const TEACHING_ACTORS: TeachingActor[] = [
+  { id: 'maya.requester', name: 'Maya', role: 'requester', department: null, blurb: 'Requester' },
+  { id: 'theo.requester', name: 'Theo', role: 'requester', department: null, blurb: 'Requester' },
+  { id: 'omar.it-handler', name: 'Omar', role: 'handler', department: 'IT', blurb: 'IT Handler' },
+  { id: 'priya.hr-handler', name: 'Priya', role: 'handler', department: 'HR', blurb: 'HR Handler' },
+  { id: 'lina.finance-approver', name: 'Lina', role: 'approver', department: 'Finance', blurb: 'Finance Approver' },
+  { id: 'sam.legal-approver', name: 'Sam', role: 'approver', department: 'Legal', blurb: 'Legal Approver' },
+  { id: 'nora.ops-admin', name: 'Nora', role: 'admin', department: 'Operations', blurb: 'Ops Admin' },
+];
+
+const TEACHING_BY_ID = new Map<string, TeachingActor>(
+  TEACHING_ACTORS.map((a) => [a.id, a]),
+);
+
+export function isTeachingActorId(userId: string | null | undefined): boolean {
+  if (!userId) return false;
+  return TEACHING_BY_ID.has(userId.trim());
+}
+
+export function getTeachingActor(userId: string | null | undefined): TeachingActor | undefined {
+  if (!userId) return undefined;
+  return TEACHING_BY_ID.get(userId.trim());
+}
+
+export interface ResolvedActor {
+  userId: string;
+  role: TeachingRole;
+  department: string | null;
+  displayName: string;
+}
+
+/** Single-source resolver: unknown/blank ids yield undefined (callers 403). */
+export function resolveTeachingActor(userId: string | null | undefined): ResolvedActor | undefined {
+  const found = getTeachingActor(userId);
+  if (!found) return undefined;
+  return {
+    userId: found.id,
+    role: found.role,
+    department: found.department,
+    displayName: `${found.name} · ${found.blurb}`,
+  };
+}
+
+/** Legacy `operator` header value maps to the `handler` capability. */
+export function isHandlerRole(role?: string | null): boolean {
+  return role === 'handler' || role === 'operator';
+}
+
+export function isApproverRole(role?: string | null): boolean {
+  return role === 'approver';
+}
+
+export function isAdminRole(role?: string | null): boolean {
+  return role === 'admin';
+}
+
+export function isRequesterRole(role?: string | null): boolean {
+  return role === 'requester';
+}
+
+/** HR/Legal payloads are sensitive: admin sees redacted metadata only. */
+export const SENSITIVE_CATEGORIES: ServiceRequestCategory[] = ['HR', 'Legal'];
+
+/**
+ * Deterministic approver assignment for the Pending Approval gate.
+ * Finance/IT/Operations -> Lina; HR/Legal -> Sam.
+ */
+export const APPROVER_FOR_CATEGORY: Record<ServiceRequestCategory, string> = {
+  IT: 'lina.finance-approver',
+  Finance: 'lina.finance-approver',
+  Operations: 'lina.finance-approver',
+  HR: 'sam.legal-approver',
+  Legal: 'sam.legal-approver',
+};
+
+export function approverForCategory(category: string): string {
+  return (
+    (APPROVER_FOR_CATEGORY as Record<string, string>)[category] ??
+    'lina.finance-approver'
+  );
+}
+
+/** Categories an approver is designated for (reverse map, for scoped metrics). */
+export function categoriesForApprover(approverId: string): ServiceRequestCategory[] {
+  return (Object.keys(APPROVER_FOR_CATEGORY) as ServiceRequestCategory[]).filter(
+    (c) => APPROVER_FOR_CATEGORY[c] === approverId,
+  );
+}
+
 export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategory[] = [
   'IT',
   'HR',

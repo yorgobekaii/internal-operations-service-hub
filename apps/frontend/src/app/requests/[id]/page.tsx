@@ -18,11 +18,7 @@ async function identity(): Promise<Record<string, string>> {
   const store = await cookies().catch(() => undefined);
   const headers: Record<string, string> = {};
   const id = store?.get('x-user-id')?.value;
-  const role = store?.get('x-user-role')?.value;
-  const dept = store?.get('x-user-dept')?.value;
   if (id) headers['x-user-id'] = id;
-  if (role) headers['x-user-role'] = role;
-  if (dept) headers['x-user-dept'] = dept;
   return headers;
 }
 
@@ -32,13 +28,9 @@ function fmt(value: string | Date | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
-function short(id: string | null | undefined): string {
-  return id ? id.slice(0, 8) : '—';
-}
-
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+    <div className="rounded-xl border border-slate-700 bg-slate-800 p-3">
       <p className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">{label}</p>
       <p className="mt-0.5 truncate text-sm font-semibold text-slate-100" title={value}>
         {value}
@@ -75,7 +67,7 @@ export default async function RequestDetailPage({
         ← Back to dashboard
       </Link>
 
-      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-indigo-600/20 via-slate-900 to-cyan-500/10 p-8">
+      <section className="rounded-xl border border-slate-700 bg-slate-800 p-6">
         <div className="flex flex-wrap gap-1.5">
           <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(req.status)}`}>
             {req.status}
@@ -87,8 +79,7 @@ export default async function RequestDetailPage({
             {req.priority ?? 'Standard'}
           </span>
         </div>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-white">{req.title}</h1>
-        <p className="mt-1 font-mono text-xs text-slate-500">{req.id}</p>
+        <h1 className="mt-3 text-2xl font-bold tracking-tight text-white">{req.title}</h1>
         {req.description && <p className="mt-3 max-w-2xl text-sm text-slate-300">{req.description}</p>}
       </section>
 
@@ -100,9 +91,9 @@ export default async function RequestDetailPage({
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Meta label="Owner" value={short(req.ownerId)} />
-        <Meta label="Backup" value={short(req.backupOwnerId)} />
-        <Meta label="Queue" value={req.queueId ? `${req.category} · ${short(req.queueId)}` : req.category} />
+        <Meta label="Owner" value={req.ownerId ? `${req.category} handler` : 'Unassigned'} />
+        <Meta label="Backup" value={req.backupOwnerId ? `${req.category} backup` : 'Unassigned'} />
+        <Meta label="Queue" value={`${req.category} queue`} />
         <Meta label="Requester" value={req.requesterId ?? '—'} />
         <Meta label="SLA due" value={fmt(req.slaDueAt)} />
         <Meta label="Created" value={fmt(req.createdAt)} />
@@ -111,7 +102,7 @@ export default async function RequestDetailPage({
       </section>
 
       {decisions.length > 0 && (
-        <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="text-sm font-bold text-white">Approval history</h2>
           <ul className="mt-3 space-y-2">
             {decisions.map((d) => (
@@ -139,11 +130,11 @@ export default async function RequestDetailPage({
           entries = [];
         }
         return entries.length > 0 ? (
-          <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+          <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
             <h2 className="text-sm font-bold text-white">Intake details</h2>
             <dl className="mt-3 grid gap-2 sm:grid-cols-2">
               {entries.map(([k, v]) => (
-                <div key={k} className="rounded-xl border border-white/10 bg-slate-950/50 p-3">
+                <div key={k} className="rounded-xl border border-slate-600 bg-slate-900 p-3">
                   <dt className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">{k}</dt>
                   <dd className="mt-0.5 text-sm text-slate-100">{v}</dd>
                 </div>
@@ -154,7 +145,7 @@ export default async function RequestDetailPage({
       })()}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="text-sm font-bold text-white">Timeline</h2>
           {audit.length === 0 ? (
             <p className="mt-2 text-xs text-slate-500">No history yet.</p>
@@ -171,7 +162,7 @@ export default async function RequestDetailPage({
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="text-sm font-bold text-white">Comments ({comments.length})</h2>
           <div className="mt-3 space-y-3">
             {comments.length === 0 ? (
@@ -179,7 +170,7 @@ export default async function RequestDetailPage({
             ) : (
               <ul className="space-y-3">
                 {comments.map((c) => (
-                  <li key={c.id} className="rounded-xl border border-white/10 bg-slate-950/50 p-3">
+                  <li key={c.id} className="rounded-xl border border-slate-600 bg-slate-900 p-3">
                     <p className="text-sm text-slate-100">{c.body}</p>
                     <p className="mt-1 text-[11px] text-slate-500">
                       {c.authorId} · {fmt(c.createdAt)}

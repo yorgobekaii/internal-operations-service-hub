@@ -160,7 +160,7 @@ export default function NewRequestForm() {
         <button
           type="submit"
           disabled={busy || category === ''}
-          className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-950 shadow transition hover:bg-slate-200 disabled:opacity-50"
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
         >
           {busy ? 'Submitting…' : 'Submit request'}
         </button>

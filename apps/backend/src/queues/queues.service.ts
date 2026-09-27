@@ -1,12 +1,17 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { toContract } from '../service-requests/service-request.mapper';
 import {
   SERVICE_REQUEST_CATEGORIES,
   SERVICE_REQUEST_PRIORITIES,
   SERVICE_REQUEST_STATUSES,
+  SENSITIVE_CATEGORIES,
+  isAdminRole,
+  isHandlerRole,
+  resolveTeachingActor,
   type Queue as SharedQueue,
-  type ServiceRequest as SharedServiceRequest,
+  type RequestActor,
+  type ResolvedActor,
   type ServiceRequestCategory,
 } from '@internal/shared';
 
@@ -25,7 +30,7 @@ export interface QueueRequestsQuery {
 }
 
 export interface QueueRequestsPage {
-  data: SharedServiceRequest[];
+  data: ReturnType<typeof toContract>[];
   page: number;
   limit: number;
   total: number;
@@ -35,9 +40,22 @@ function seedEmail(category: string, kind: 'owner' | 'backup'): string {
   return `${category.toLowerCase()}.${kind}@internal.local`;
 }
 
+type ActorInput = ResolvedActor | RequestActor | undefined;
+
 @Injectable()
 export class QueuesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private requireResolved(actor?: ActorInput): ResolvedActor {
+    const userId = (actor as { userId?: string } | undefined)?.userId;
+    const resolved = resolveTeachingActor(
+      typeof userId === 'string' ? userId : undefined,
+    );
+    if (!resolved) {
+      throw new ForbiddenException('Forbidden: unknown or missing actor');
+    }
+    return resolved;
+  }
 
   private async ensureSeedUser(
     email: string,
@@ -90,13 +108,22 @@ export class QueuesService {
     }
   }
 
-  async listQueues(): Promise<QueueWithCounts[]> {
+  async listQueues(actor?: ActorInput): Promise<QueueWithCounts[]> {
+    const resolved = this.requireResolved(actor);
+    // Requesters and approvers have no queue-workbench scope.
+    if (!isAdminRole(resolved.role) && !isHandlerRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: handler or admin required');
+    }
     await this.ensureDefaultQueues();
     const queues = await this.prisma.queue.findMany({
       orderBy: { category: 'asc' },
     });
+    const visible =
+      isAdminRole(resolved.role)
+        ? queues
+        : queues.filter((q) => q.category === resolved.department);
     return Promise.all(
-      queues.map(async (q) => {
+      visible.map(async (q) => {
         const [openCount, totalCount] = await Promise.all([
           this.prisma.serviceRequest.count({
             where: { queueId: q.id, status: { in: ACTIVE_STATUSES } },
@@ -119,10 +146,18 @@ export class QueuesService {
   async findByQueue(
     queueId: string,
     query: QueueRequestsQuery,
+    actor?: ActorInput,
   ): Promise<QueueRequestsPage> {
+    const resolved = this.requireResolved(actor);
+    if (!isAdminRole(resolved.role) && !isHandlerRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: handler or admin required');
+    }
     const queue = await this.prisma.queue.findUnique({ where: { id: queueId } });
     if (!queue) {
       throw new NotFoundException(`Queue with ID ${queueId} not found`);
+    }
+    if (isHandlerRole(resolved.role) && queue.category !== resolved.department) {
+      throw new ForbiddenException('Forbidden: outside your department queue');
     }
     const where: Record<string, unknown> = { queueId };
     if (query.status !== undefined) {
@@ -154,6 +189,15 @@ export class QueuesService {
         take: limit,
       }),
     ]);
-    return { data: rows.map(toContract), page, limit, total };
+    const data = rows.map(toContract).map((r) => {
+      if (
+        isAdminRole(resolved.role) &&
+        (SENSITIVE_CATEGORIES as string[]).includes(r.category)
+      ) {
+        return { ...r, description: '[restricted: sensitive request]', payloadJson: null };
+      }
+      return r;
+    });
+    return { data, page, limit, total };
   }
 }

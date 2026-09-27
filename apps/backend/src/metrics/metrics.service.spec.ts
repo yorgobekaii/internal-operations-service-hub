@@ -1,9 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MetricsService } from './metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ForbiddenException } from '@nestjs/common';
 
 const NOW = new Date('2026-09-25T12:00:00Z');
 const h = (n: number) => new Date(NOW.getTime() - n * 60 * 60 * 1000);
+
+const ADMIN = { userId: 'nora.ops-admin' };
+const IT_HANDLER = { userId: 'omar.it-handler' };
+const REQUESTER = { userId: 'maya.requester' };
+const APPROVER = { userId: 'lina.finance-approver' };
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -36,6 +42,24 @@ const QUEUES = [
     createdAt: h(100),
     updatedAt: h(100),
   },
+  {
+    id: 'q-hr',
+    name: 'HR Queue',
+    category: 'HR',
+    ownerId: null,
+    backupOwnerId: null,
+    createdAt: h(100),
+    updatedAt: h(100),
+  },
+  {
+    id: 'q-fin',
+    name: 'Finance Queue',
+    category: 'Finance',
+    ownerId: null,
+    backupOwnerId: null,
+    createdAt: h(100),
+    updatedAt: h(100),
+  },
 ];
 
 describe('MetricsService', () => {
@@ -60,8 +84,20 @@ describe('MetricsService', () => {
     prisma = module.get<PrismaService>(PrismaService);
   });
 
-  it('reports zeros and nulls on an empty store', async () => {
-    const report = await service.getQueueHealth(NOW);
+  it('rejects missing/unknown/requester actors with 403', async () => {
+    await expect(service.getQueueHealth(undefined, NOW)).rejects.toThrow(
+      ForbiddenException,
+    );
+    await expect(
+      service.getQueueHealth({ userId: 'ghost' }, NOW),
+    ).rejects.toThrow(ForbiddenException);
+    await expect(service.getQueueHealth(REQUESTER, NOW)).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('reports zeros and nulls on an empty store (admin)', async () => {
+    const report = await service.getQueueHealth(ADMIN, NOW);
 
     expect(report.backlog).toBe(0);
     expect(report.breachedOpen).toBe(0);
@@ -73,7 +109,7 @@ describe('MetricsService', () => {
     expect(report.perQueue).toEqual([]);
   });
 
-  it('computes backlog, breaches, late resolutions, ages and cycles', async () => {
+  it('computes backlog, breaches, late resolutions, ages and cycles (admin full scope)', async () => {
     jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([
       row({ id: 'r1', status: 'In Progress', createdAt: h(10), updatedAt: h(9), slaDueAt: h(2) }),
       row({ id: 'r2', status: 'Submitted', createdAt: h(2), updatedAt: h(2), slaDueAt: new Date(NOW.getTime() + 70 * 60 * 60 * 1000) }),
@@ -82,7 +118,7 @@ describe('MetricsService', () => {
       row({ id: 'r5', status: 'Declined', queueId: null, createdAt: h(30), updatedAt: h(29) }),
     ]);
 
-    const report = await service.getQueueHealth(NOW);
+    const report = await service.getQueueHealth(ADMIN, NOW);
 
     expect(report.volume.total).toBe(5);
     expect(report.volume.last24h).toBe(2);
@@ -102,12 +138,37 @@ describe('MetricsService', () => {
     expect(report.perQueue[0].avgAgeHours).toBeCloseTo(6, 5);
   });
 
-  it('buckets unrouted open requests separately', async () => {
+  it('scopes handler metrics to their department queue', async () => {
+    jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([
+      row({ id: 'r1', queueId: 'q-it', status: 'Submitted', createdAt: h(2), updatedAt: h(2) }),
+      row({ id: 'r2', queueId: 'q-hr', status: 'Submitted', createdAt: h(2), updatedAt: h(2) }),
+    ]);
+
+    const report = await service.getQueueHealth(IT_HANDLER, NOW);
+    expect(report.volume.total).toBe(1);
+    expect(report.backlog).toBe(1);
+    expect(report.perQueue).toHaveLength(1);
+    expect(report.perQueue[0].category).toBe('IT');
+  });
+
+  it('scopes approver metrics to designated categories', async () => {
+    jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([
+      row({ id: 'r1', queueId: 'q-it', status: 'Submitted', createdAt: h(2), updatedAt: h(2) }),
+      row({ id: 'r2', queueId: 'q-hr', status: 'Submitted', createdAt: h(2), updatedAt: h(2) }),
+    ]);
+
+    // Lina covers IT/Finance/Operations, not HR.
+    const report = await service.getQueueHealth(APPROVER, NOW);
+    expect(report.volume.total).toBe(1);
+    expect(report.perQueue[0].category).toBe('IT');
+  });
+
+  it('buckets unrouted open requests separately (admin)', async () => {
     jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([
       row({ id: 'r9', queueId: null, createdAt: h(4), updatedAt: h(4) }),
     ]);
 
-    const report = await service.getQueueHealth(NOW);
+    const report = await service.getQueueHealth(ADMIN, NOW);
 
     expect(report.backlog).toBe(1);
     expect(report.perQueue).toHaveLength(1);

@@ -39,7 +39,7 @@ export default function CommentForm({ id }: { id: string }) {
       <button
         type="submit"
         disabled={busy}
-        className="rounded-xl bg-white px-4 py-1.5 text-xs font-bold text-slate-950 shadow transition hover:bg-slate-200 disabled:opacity-50"
+        className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
       >
         {busy ? 'Posting…' : 'Post comment'}
       </button>

@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { TEACHING_ACTORS, USER_ID_HEADER } from '@internal/shared';
+
+const COOKIE = USER_ID_HEADER;
 
 function readCookie(name: string): string {
   if (typeof document === 'undefined') return '';
@@ -11,84 +14,80 @@ function readCookie(name: string): string {
   return match ? decodeURIComponent(match.split('=').slice(1).join('=')) : '';
 }
 
-function writeCookie(name: string, value: string) {
+function writeActorCookie(value: string) {
   const attrs = 'path=/; max-age=31536000; SameSite=Lax';
   document.cookie = value
-    ? `${name}=${encodeURIComponent(value)}; ${attrs}`
-    : `${name}=; path=/; max-age=0`;
+    ? `${COOKIE}=${encodeURIComponent(value)}; ${attrs}`
+    : `${COOKIE}=; path=/; max-age=0`;
+  // Clear legacy client-declared role/dept cookies (never trusted).
+  document.cookie = 'x-user-role=; path=/; max-age=0';
+  document.cookie = 'x-user-dept=; path=/; max-age=0';
 }
 
+/**
+ * Compact teaching simulation picker. Writes ONLY the actor id;
+ * role/department resolve server-side from the teaching registry.
+ */
 export default function RoleSwitcher() {
   const router = useRouter();
-  const [userId, setUserId] = useState('');
-  const [role, setRole] = useState('');
-  const [dept, setDept] = useState('');
+  const [actorId, setActorId] = useState('');
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setUserId(readCookie('x-user-id'));
-    setRole(readCookie('x-user-role'));
-    setDept(readCookie('x-user-dept'));
+    setActorId(readCookie(COOKIE) || readCookie('x-user-id'));
     setReady(true);
   }, []);
 
-  function apply() {
-    writeCookie('x-user-id', userId.trim());
-    writeCookie('x-user-role', role);
-    writeCookie('x-user-dept', dept);
+  function onSelect(value: string) {
+    setActorId(value);
+    writeActorCookie(value.trim());
     router.refresh();
   }
 
-  function clear() {
-    setUserId('');
-    setRole('');
-    setDept('');
-    writeCookie('x-user-id', '');
-    writeCookie('x-user-role', '');
-    writeCookie('x-user-dept', '');
+  function reset() {
+    setActorId('');
+    writeActorCookie('');
     router.refresh();
   }
 
   if (!ready) return null;
 
-  const inputCls =
-    'rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 focus:border-indigo-400 focus:outline-none';
+  const current = TEACHING_ACTORS.find((a) => a.id === actorId);
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5" title="Dev identity stub — sets x-user-* cookies sent to the backend">
-      <input
-        value={userId}
-        onChange={(e) => setUserId(e.target.value)}
-        placeholder="user id (e.g. alice)"
-        className={`${inputCls} w-32`}
-      />
-      <select value={role} onChange={(e) => setRole(e.target.value)} className={inputCls}>
-        <option value="">role…</option>
-        <option value="requester">requester</option>
-        <option value="operator">operator</option>
-        <option value="admin">admin</option>
-      </select>
-      <select value={dept} onChange={(e) => setDept(e.target.value)} className={inputCls}>
-        <option value="">dept…</option>
-        <option value="IT">IT</option>
-        <option value="HR">HR</option>
-        <option value="Finance">Finance</option>
-        <option value="Operations">Operations</option>
-      </select>
-      <button
-        type="button"
-        onClick={apply}
-        className="rounded-lg bg-indigo-500 px-2 py-1 text-xs font-bold text-white hover:bg-indigo-400"
+    <div className="flex items-center gap-2" title="Teaching simulation — backend resolves role from the actor id">
+      <label htmlFor="actor-sim" className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+        Viewing as
+      </label>
+      <select
+        id="actor-sim"
+        value={actorId}
+        onChange={(e) => onSelect(e.target.value)}
+        className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-indigo-400 focus:outline-none"
       >
-        Use
-      </button>
-      {(userId || role) && (
+        <option value="">Select actor…</option>
+        {TEACHING_ACTORS.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name} · {a.blurb}{a.department ? ` (${a.department})` : ''}
+          </option>
+        ))}
+      </select>
+      {current ? (
+        <span className="rounded-full border border-indigo-400/30 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">
+          {current.name} · {current.blurb}
+        </span>
+      ) : (
+        <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
+          No actor — actions return 403
+        </span>
+      )}
+      {actorId && (
         <button
           type="button"
-          onClick={clear}
-          className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-400 hover:text-white"
+          onClick={reset}
+          className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:text-white"
         >
-          Clear
+          Reset
         </button>
       )}
     </div>

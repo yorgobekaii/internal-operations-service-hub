@@ -3,13 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import {
-  OPERATOR_ROLES,
   SERVICE_REQUEST_ROUTES,
-  USER_DEPT_HEADER,
   USER_ID_HEADER,
-  USER_ROLE_HEADER,
   type AiTriageSuggestion,
-  type OperatorRole,
   type ServiceRequestPriority,
   type ServiceRequestStatus,
 } from '@internal/shared';
@@ -17,20 +13,17 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 const API_URL = `${API_BASE}${SERVICE_REQUEST_ROUTES.base}`;
 const AI_TRIAGE_URL = `${API_BASE}${SERVICE_REQUEST_ROUTES.aiTriage}`;
-const OPERATOR_ROLE: OperatorRole = OPERATOR_ROLES[0];
 
 async function identityHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
     const store = await cookies();
+    // Teaching simulation sends ONLY the actor id. Role/department resolve
+    // server-side; legacy role/dept cookies are never forwarded.
     const id = store.get(USER_ID_HEADER)?.value ?? store.get('x-user-id')?.value;
-    const role = store.get(USER_ROLE_HEADER)?.value ?? store.get('x-user-role')?.value;
-    const dept = store.get(USER_DEPT_HEADER)?.value ?? store.get('x-user-dept')?.value;
     if (id) headers[USER_ID_HEADER] = id;
-    if (role) headers[USER_ROLE_HEADER] = role;
-    if (dept) headers[USER_DEPT_HEADER] = dept;
   } catch {
-    // cookies() unavailable (e.g. prerender) — fall back to anonymous.
+    // cookies() unavailable (e.g. prerender) — no identity; backend 403s.
   }
   return headers;
 }
@@ -148,14 +141,14 @@ export async function suggestTriage(
 export async function updateServiceRequestStatus(
   id: string,
   status: ServiceRequestStatus,
+  blockedReason?: string,
 ) {
   try {
     const headers = await identityHeaders();
-    if (!headers[USER_ROLE_HEADER]) headers[USER_ROLE_HEADER] = OPERATOR_ROLE;
     const res = await fetch(`${API_URL}/${id}/status`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, ...(blockedReason ? { blockedReason } : {}) }),
     });
 
     if (!res.ok) {
@@ -165,6 +158,7 @@ export async function updateServiceRequestStatus(
 
     revalidatePath('/');
     revalidatePath('/approvals');
+    revalidatePath(`/requests/${id}`);
     return { success: true };
   } catch {
     return { error: 'Failed to connect to backend' };
@@ -174,7 +168,6 @@ export async function updateServiceRequestStatus(
 export async function approveServiceRequest(id: string) {
   try {
     const headers = await identityHeaders();
-    if (!headers[USER_ROLE_HEADER]) headers[USER_ROLE_HEADER] = OPERATOR_ROLE;
     const res = await fetch(`${API_URL}/${id}/approve`, {
       method: 'POST',
       headers,
@@ -200,7 +193,6 @@ export async function rejectServiceRequest(id: string, rationale: string) {
   }
   try {
     const headers = await identityHeaders();
-    if (!headers[USER_ROLE_HEADER]) headers[USER_ROLE_HEADER] = OPERATOR_ROLE;
     const res = await fetch(`${API_URL}/${id}/reject`, {
       method: 'POST',
       headers,
