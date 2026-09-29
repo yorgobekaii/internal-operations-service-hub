@@ -34,14 +34,15 @@ describe('Admin command center E2E', () => {
     await request(app.getHttpServer()).get('/admin/users').set('x-user-id', 'maya.requester').expect(403);
     await request(app.getHttpServer()).get('/admin/settings').set('x-user-id', 'omar.it-handler').expect(403);
     await request(app.getHttpServer()).get('/admin/audit').expect(403);
-    await request(app.getHttpServer()).get('/metrics/calendar').set('x-user-id', 'maya.requester').expect(403);
+    await request(app.getHttpServer()).get('/metrics/queue-health').set('x-user-id', 'maya.requester').expect(403);
   });
 
-  it('returns daily performance and supports the overall period view', async () => {
-    const response = await request(app.getHttpServer()).get('/metrics/calendar').set('x-user-id', 'nora.ops-admin').expect(200);
-    expect(response.body).toMatchObject({ from: expect.any(String), to: expect.any(String) });
-    expect(Array.isArray(response.body.days)).toBe(true);
-    expect(response.body.days[0]).toEqual(expect.objectContaining({ date: expect.any(String), created: expect.any(Number), resolved: expect.any(Number), declined: expect.any(Number), breached: expect.any(Number) }));
+  it('supports all-time and date-filtered queue health snapshots', async () => {
+    const allTime = await request(app.getHttpServer()).get('/metrics/queue-health').set('x-user-id', 'nora.ops-admin').expect(200);
+    const dated = await request(app.getHttpServer()).get('/metrics/queue-health?asOf=2030-01-01').set('x-user-id', 'nora.ops-admin').expect(200);
+    expect(allTime.body).toHaveProperty('backlog');
+    expect(dated.body).toHaveProperty('backlog');
+    expect(new Date(dated.body.generatedAt).toISOString()).toBe('2030-01-01T23:59:59.999Z');
   });
 
   it('creates, edits, hides, resolves, and deactivates a teaching actor', async () => {

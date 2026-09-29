@@ -363,7 +363,6 @@ export const SERVICE_REQUEST_ROUTES = {
 export const APPROVALS_ROUTE = '/approvals';
 
 export const METRICS_ROUTE = '/metrics/queue-health';
-export const PERFORMANCE_CALENDAR_ROUTE = '/metrics/calendar';
 
 export interface QueueHealth {
   queueId: string | null;
@@ -389,21 +388,6 @@ export interface QueueHealthReport {
   avgQueueAgeHours: number | null;
   avgCycleHours: number | null;
   perQueue: QueueHealth[];
-}
-
-export interface DailyPerformance {
-  date: string;
-  created: number;
-  resolved: number;
-  declined: number;
-  breached: number;
-  averageCycleHours: number | null;
-}
-
-export interface PerformanceCalendar {
-  from: string;
-  to: string;
-  days: DailyPerformance[];
 }
 
 export const QUEUE_ROUTES = {

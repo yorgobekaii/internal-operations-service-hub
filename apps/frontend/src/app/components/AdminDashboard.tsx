@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { METRICS_ROUTE, PERFORMANCE_CALENDAR_ROUTE, type PerformanceCalendar, type QueueHealthReport } from '@internal/shared';
+import { METRICS_ROUTE, type QueueHealthReport } from '@internal/shared';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 const REFRESH_MS = 4000;
@@ -33,13 +33,14 @@ export default function AdminDashboard() {
   const [report, setReport] = useState<QueueHealthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string>('');
-  const [calendar, setCalendar] = useState<PerformanceCalendar | null>(null);
+  const [asOf, setAsOf] = useState('');
 
   useEffect(() => {
     let alive = true;
     async function load() {
       try {
-        const res = await fetch(`${API_BASE}${METRICS_ROUTE}`, { cache: 'no-store', headers: actorHeaders() });
+        const query = asOf ? `?asOf=${encodeURIComponent(asOf)}` : '';
+        const res = await fetch(`${API_BASE}${METRICS_ROUTE}${query}`, { cache: 'no-store', headers: actorHeaders() });
         if (res.status === 403) throw new Error('Backend 403: select a handler, approver, or admin actor');
         if (!res.ok) throw new Error(`Backend ${res.status}`);
         const data = (await res.json()) as QueueHealthReport;
@@ -47,8 +48,6 @@ export default function AdminDashboard() {
         setReport(data);
         setError(null);
         setUpdatedAt(new Date().toLocaleTimeString());
-        const calendarResponse = await fetch(`${API_BASE}${PERFORMANCE_CALENDAR_ROUTE}`, { cache: 'no-store', headers: actorHeaders() });
-        if (calendarResponse.ok && alive) setCalendar((await calendarResponse.json()) as PerformanceCalendar);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'Could not reach metrics — is the backend running?');
       }
@@ -59,7 +58,7 @@ export default function AdminDashboard() {
       alive = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [asOf]);
 
   if (error && !report) {
     return (
@@ -73,21 +72,21 @@ export default function AdminDashboard() {
     return <p className="text-xs text-slate-500">Loading queue health…</p>;
   }
 
-  const calendarTotals = calendar?.days.reduce((total, day) => ({
-    created: total.created + day.created,
-    resolved: total.resolved + day.resolved,
-    declined: total.declined + day.declined,
-    breached: total.breached + day.breached,
-  }), { created: 0, resolved: 0, declined: 0, breached: 0 });
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[11px] text-slate-500">
-          Scoped aggregates · refreshes every {REFRESH_MS / 1000}s{updatedAt ? ` · updated ${updatedAt}` : ''}
+          {asOf ? `Metrics snapshot through ${asOf}` : 'All-time metrics'} · refreshes every {REFRESH_MS / 1000}s{updatedAt ? ` · updated ${updatedAt}` : ''}
         </p>
-        {error && <p className="text-[11px] text-amber-700">{error}</p>}
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setAsOf('')} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${!asOf ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>All time</button>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${asOf ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-300 bg-white text-slate-700'}`}>
+            <span>Calendar</span>
+            <input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} className="bg-transparent text-slate-900 outline-none" />
+          </label>
+        </div>
       </div>
+      {error && <p className="text-[11px] text-amber-700">{error}</p>}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Backlog (open)" value={String(report.backlog)} />
@@ -99,11 +98,6 @@ export default function AdminDashboard() {
         <Stat label="Avg queue age" value={hours(report.avgQueueAgeHours)} />
         <Stat label="Avg cycle time" value={hours(report.avgCycleHours)} />
       </section>
-
-      {calendar && <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-lg font-semibold text-slate-950">Daily performance</h2><p className="text-xs text-slate-500">{calendar.from} through {calendar.to}. Select a day to compare created work, completions, declines, and breaches.</p></div><div className="flex gap-2 text-xs"><span className="rounded-lg bg-blue-50 px-2 py-1 text-blue-700">Created {calendarTotals?.created ?? 0}</span><span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-700">Resolved {calendarTotals?.resolved ?? 0}</span><span className="rounded-lg bg-rose-50 px-2 py-1 text-rose-700">Declined {calendarTotals?.declined ?? 0}</span><span className="rounded-lg bg-amber-50 px-2 py-1 text-amber-700">Breached {calendarTotals?.breached ?? 0}</span></div></div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7">{calendar.days.map((day) => <div key={day.date} className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-xs font-semibold text-slate-700">{day.date}</p><p className="mt-2 text-[11px] text-blue-700">Created <strong>{day.created}</strong></p><p className="text-[11px] text-emerald-700">Resolved <strong>{day.resolved}</strong></p><p className="text-[11px] text-rose-700">Declined <strong>{day.declined}</strong></p><p className="text-[11px] text-amber-700">Breached <strong>{day.breached}</strong></p><p className="mt-1 text-[10px] text-slate-500">Cycle {day.averageCycleHours === null ? '—' : `${day.averageCycleHours.toFixed(1)}h`}</p></div>)}</div>
-      </section>}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-left text-sm">
