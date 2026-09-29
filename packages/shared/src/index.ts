@@ -44,6 +44,11 @@ export interface DeclineServiceRequestDto {
   rationale: string;
 }
 
+export interface ReassignServiceRequestDto {
+  /** Teaching actor id of the new handler (must serve the ticket's queue). */
+  ownerId: string;
+}
+
 export interface ServiceRequest {
   id: string;
   title: string;
@@ -301,6 +306,7 @@ export const SERVICE_REQUEST_ROUTES = {
   rejectById: (id: string) => `/service-requests/${id}/reject`,
   declineById: (id: string) => `/service-requests/${id}/decline`,
   approvalsById: (id: string) => `/service-requests/${id}/approvals`,
+  assignById: (id: string) => `/service-requests/${id}/assign`,
   commentsById: (id: string) => `/service-requests/${id}/comments`,
   aiTriage: '/service-requests/ai-triage',
 } as const;

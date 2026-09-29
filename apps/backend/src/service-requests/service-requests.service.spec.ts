@@ -796,6 +796,88 @@ describe('ServiceRequestsService', () => {
     });
   });
 
+  describe('Slice 5: Reassignment within the department queue', () => {
+    const itQueue = {
+      id: 'queue-it',
+      name: 'IT Queue',
+      category: 'IT',
+      ownerId: 'owner-it',
+      backupOwnerId: 'backup-it',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    it('reassigns to a same-department handler with a reassigned audit', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(
+          buildRow({ status: 'In Progress', queueId: 'queue-it', ownerId: 'owner-old' }),
+        );
+      jest.spyOn(prisma.queue, 'findUnique').mockResolvedValue(itQueue);
+      mockTx.serviceRequest.update.mockResolvedValue(
+        buildRow({ status: 'In Progress', queueId: 'queue-it', ownerId: 'omar.it-handler' }),
+      );
+
+      const result = await service.reassign(
+        'test-id',
+        { ownerId: 'omar.it-handler' },
+        NORA,
+      );
+
+      expect(result.ownerId).toBe('omar.it-handler');
+      expect(mockTx.serviceRequest.update).toHaveBeenCalledWith({
+        where: { id: 'test-id' },
+        data: expect.objectContaining({ ownerId: 'omar.it-handler' }),
+      });
+      expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'reassigned',
+          actorId: 'nora.ops-admin',
+          from: 'owner-old',
+          to: 'omar.it-handler',
+        }),
+      });
+    });
+
+    it('refuses bad input, wrong roles, cross-department targets and terminals', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Submitted', queueId: 'queue-it' }));
+      jest.spyOn(prisma.queue, 'findUnique').mockResolvedValue(itQueue);
+
+      await expect(service.reassign('test-id', {}, NORA)).rejects.toThrow(
+        'A new ownerId is required.',
+      );
+      await expect(service.reassign('test-id', { ownerId: 'ghost' }, NORA)).rejects.toThrow(
+        'Unknown owner: ghost.',
+      );
+      await expect(
+        service.reassign('test-id', { ownerId: 'omar.it-handler' }, MAYA),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.reassign('test-id', { ownerId: 'omar.it-handler' }, LINA),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.reassign('test-id', { ownerId: 'priya.hr-handler' }, NORA),
+      ).rejects.toThrow('does not serve the IT queue');
+      await expect(
+        service.reassign('test-id', { ownerId: 'maya.requester' }, NORA),
+      ).rejects.toThrow('does not serve the IT queue');
+
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Resolved', queueId: 'queue-it' }));
+      await expect(
+        service.reassign('test-id', { ownerId: 'omar.it-handler' }, NORA),
+      ).rejects.toThrow('Request is immutable and cannot be updated');
+
+      jest.spyOn(prisma.serviceRequest, 'findUnique').mockResolvedValue(null);
+      await expect(
+        service.reassign('test-id', { ownerId: 'omar.it-handler' }, NORA),
+      ).rejects.toThrow('not found');
+    });
+  });
+
   describe('Step E: Category intake validation', () => {
     it('refuses intake missing required category fields', async () => {
       await expect(

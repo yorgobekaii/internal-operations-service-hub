@@ -240,4 +240,30 @@ export async function declineServiceRequest(id: string, rationale: string) {
   }
 }
 
+export async function reassignServiceRequest(id: string, ownerId: string) {
+  if (!ownerId || ownerId.trim().length === 0) {
+    return { error: 'Select a new owner first.' };
+  }
+  try {
+    const headers = await identityHeaders();
+    const res = await fetch(`${API_URL}/${id}/assign`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ ownerId: ownerId.trim() }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      return { error: errorData.message || 'Failed to reassign request' };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/approvals');
+    revalidatePath(`/requests/${id}`);
+    return { success: true };
+  } catch {
+    return { error: 'Failed to connect to backend' };
+  }
+}
+
 export type { ServiceRequestPriority };

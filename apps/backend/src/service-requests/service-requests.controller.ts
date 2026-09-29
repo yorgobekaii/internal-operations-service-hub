@@ -9,6 +9,7 @@ import {
   RejectServiceRequestDto,
 } from './dto/decision.dto';
 import { AiTriageRequestDto } from './dto/ai-triage-request.dto';
+import { ReassignServiceRequestDto } from './dto/reassign-service-request.dto';
 import { AiTriageService } from './ai/ai-triage.service';
 import {
   RequireActorGuard,
@@ -148,6 +149,20 @@ export class ServiceRequestsController {
   async listApprovals(@Param('id') id: string, @Req() req: unknown) {
     return this.serviceRequestsService.listApprovalSteps(
       id,
+      resolvedActorFromRequest(req),
+    );
+  }
+
+  @Patch(':id/assign')
+  @UseGuards(RequireHandlerGuard)
+  async reassign(
+    @Param('id') id: string,
+    @Body() dto: ReassignServiceRequestDto,
+    @Req() req: unknown,
+  ) {
+    return this.serviceRequestsService.reassign(
+      id,
+      dto ?? {},
       resolvedActorFromRequest(req),
     );
   }

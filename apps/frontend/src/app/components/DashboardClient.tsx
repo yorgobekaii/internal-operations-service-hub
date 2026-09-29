@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   approveServiceRequest,
   declineServiceRequest,
+  reassignServiceRequest,
   rejectServiceRequest,
   updateServiceRequestStatus,
 } from '../actions';
@@ -15,7 +16,7 @@ import {
   priorityBadge,
   statusBadge,
 } from './badges';
-import { getTeachingActor } from '@internal/shared';
+import { TEACHING_ACTORS, getTeachingActor } from '@internal/shared';
 import type {
   ServiceRequest,
   ServiceRequestCategory,
@@ -72,7 +73,7 @@ function readActorId(): string {
   return match ? decodeURIComponent(match.split('=').slice(1).join('=')) : '';
 }
 
-type Expanded = { id: string; kind: 'reject' | 'block' | 'decline' } | null;
+type Expanded = { id: string; kind: 'reject' | 'block' | 'decline' | 'reassign' } | null;
 
 export default function DashboardClient({
   initial,
@@ -94,6 +95,7 @@ export default function DashboardClient({
   const [rationale, setRationale] = useState('');
   const [blockedReason, setBlockedReason] = useState('');
   const [declineRationale, setDeclineRationale] = useState('');
+  const [reassignOwner, setReassignOwner] = useState('');
   const [actorId, setActorId] = useState('');
 
   useEffect(() => {
@@ -218,6 +220,29 @@ export default function DashboardClient({
         setExpanded(null);
         setRationale('');
         flashSuccess(id, 'Declined with rationale.');
+      }
+    } finally {
+      setBusyId(null);
+      setBusyAction(null);
+    }
+  }
+
+  async function reassign(id: string, ownerId: string) {
+    setBusyId(id);
+    setBusyAction('reassign-confirm');
+    setRowErrors((prev) => {
+      const nextErrors = { ...prev };
+      delete nextErrors[id];
+      return nextErrors;
+    });
+    try {
+      const res = await reassignServiceRequest(id, ownerId);
+      if (res.error) {
+        flashError(id, typeof res.error === 'string' ? res.error : 'Reassign failed.');
+      } else {
+        setExpanded(null);
+        setReassignOwner('');
+        flashSuccess(id, `Reassigned to ${ownerId}.`);
       }
     } finally {
       setBusyId(null);
@@ -529,6 +554,78 @@ export default function DashboardClient({
                                 </button>
                               </div>
                             </form>
+                          ) : expanded.kind === 'reassign' &&
+                            req.status !== 'Resolved' &&
+                            req.status !== 'Declined' ? (
+                            <form
+                              className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                              aria-label={`Reassign ${req.title}`}
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                void reassign(req.id, reassignOwner);
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <h3 className="text-sm font-bold text-slate-900">
+                                  Reassign ({req.category} handlers only)
+                                </h3>
+                                <span className="pill-base border-slate-200 bg-slate-100 text-slate-600">
+                                  {req.id.slice(0, 8)}
+                                </span>
+                              </div>
+                              <label
+                                htmlFor={`owner-${req.id}`}
+                                className="mt-2 block text-xs font-semibold tracking-wide text-slate-700 uppercase"
+                              >
+                                New owner
+                              </label>
+                              <select
+                                id={`owner-${req.id}`}
+                                value={reassignOwner}
+                                onChange={(e) => setReassignOwner(e.target.value)}
+                                className="field-select mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none"
+                              >
+                                <option value="">Select…</option>
+                                {TEACHING_ACTORS.filter(
+                                  (a) =>
+                                    (a.role === 'handler' || (a.role as string) === 'operator') &&
+                                    a.department === req.category,
+                                ).map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name} · {a.id}
+                                  </option>
+                                ))}
+                              </select>
+                              {rowErrors[req.id] && (
+                                <p
+                                  role="alert"
+                                  className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700"
+                                >
+                                  {rowErrors[req.id]}
+                                </p>
+                              )}
+                              <div className="mt-3 flex gap-2">
+                                <button
+                                  type="submit"
+                                  disabled={busy || !reassignOwner}
+                                  className="btn-table btn-table-solid focus-ring"
+                                >
+                                  {busy && busyAction === 'reassign-confirm'
+                                    ? 'Working…'
+                                    : 'Confirm reassign'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExpanded(null);
+                                    setReassignOwner('');
+                                  }}
+                                  className="btn-table btn-table-quiet focus-ring"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
                           ) : expanded.kind === 'decline' &&
                             (req.status === 'Submitted' ||
                               req.status === 'In Progress' ||
@@ -708,7 +805,7 @@ function RequestActions({
     reason?: string,
   ) => Promise<void>;
   onApprove: () => Promise<void>;
-  onToggleExpand: (kind: 'reject' | 'block' | 'decline') => void;
+  onToggleExpand: (kind: 'reject' | 'block' | 'decline' | 'reassign') => void;
 }) {
   const action = nextStatusFor(req.status);
   const isRequester = role === 'requester';
@@ -806,6 +903,19 @@ function RequestActions({
               className="btn-table btn-table-quiet focus-ring"
             >
               Decline
+            </button>
+          )}
+        {(isHandler || isAdmin) &&
+          req.status !== 'Resolved' &&
+          req.status !== 'Declined' && (
+            <button
+              type="button"
+              disabled={busy}
+              aria-expanded={expanded?.id === req.id && expanded.kind === 'reassign'}
+              onClick={() => onToggleExpand('reassign')}
+              className="btn-table btn-table-quiet focus-ring"
+            >
+              Reassign
             </button>
           )}
         {isApprover && req.status === 'Pending Approval' && (

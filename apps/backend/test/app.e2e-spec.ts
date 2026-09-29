@@ -160,6 +160,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
       () => request(app.getHttpServer()).post(`/service-requests/${id}/reject`).send({ rationale: 'no' }).expect(403),
       () => request(app.getHttpServer()).post(`/service-requests/${id}/decline`).send({ rationale: 'no' }).expect(403),
       () => request(app.getHttpServer()).get(`/service-requests/${id}/approvals`).expect(403),
+      () => request(app.getHttpServer()).patch(`/service-requests/${id}/assign`).send({ ownerId: 'omar.it-handler' }).expect(403),
       () => request(app.getHttpServer()).get('/approvals').expect(403),
       () => request(app.getHttpServer()).get('/queues').expect(403),
       () => request(app.getHttpServer()).get(`/queues/${queueId}/requests`).expect(403),
@@ -436,6 +437,79 @@ describe('AppController (e2e) [isolated test.db]', () => {
         if (res.body.status !== 'Pending Approval')
           throw new Error('Expected manual gate to Pending Approval');
       });
+  });
+
+  it('Slice 5: reassignment stays inside the department queue with audit', async () => {
+    const postRes = await createRequest('E2E Reassign Flow', 'IT', MAYA);
+    const id = postRes.body.id;
+    const previous = postRes.body.ownerId as string;
+
+    // Bad input and wrong roles are refused.
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({})
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ ownerId: 'ghost' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, MAYA)
+      .send({ ownerId: 'omar.it-handler' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, LINA)
+      .send({ ownerId: 'omar.it-handler' })
+      .expect(403);
+    // Cross-department target is refused.
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ ownerId: 'priya.hr-handler' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ ownerId: 'omar.it-handler' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.ownerId !== 'omar.it-handler')
+          throw new Error('Expected new owner');
+      });
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/audit`)
+      .set(USER_ID_HEADER, MAYA)
+      .expect(200);
+    const last = audit.body[audit.body.length - 1];
+    expect(last).toMatchObject({
+      action: 'reassigned',
+      actorId: OMAR,
+      from: previous,
+      to: 'omar.it-handler',
+    });
+
+    // Terminal tickets stay closed.
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ status: 'In Progress' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/status`)
+      .set(USER_ID_HEADER, NORA)
+      .send({ status: 'Resolved' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${id}/assign`)
+      .set(USER_ID_HEADER, NORA)
+      .send({ ownerId: 'omar.it-handler' })
+      .expect(422);
   });
 
   it('Forbidden mutations leave state and audit unchanged', async () => {

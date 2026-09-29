@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import {
   approveServiceRequest,
   declineServiceRequest,
+  reassignServiceRequest,
   rejectServiceRequest,
   updateServiceRequestStatus,
 } from '../actions';
 import { nextStatusFor } from './badges';
-import { getTeachingActor } from '@internal/shared';
+import { TEACHING_ACTORS, getTeachingActor } from '@internal/shared';
 import type { ServiceRequest, ServiceRequestStatus } from '@internal/shared';
 
 function readActorId(): string {
@@ -34,12 +35,13 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<'reject' | 'block' | 'decline' | null>(
-    null,
-  );
+  const [expanded, setExpanded] = useState<
+    'reject' | 'block' | 'decline' | 'reassign' | null
+  >(null);
   const [rationale, setRationale] = useState('');
   const [blockedReason, setBlockedReason] = useState('');
   const [declineRationale, setDeclineRationale] = useState('');
+  const [newOwner, setNewOwner] = useState(req.ownerId ?? '');
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setActorId(readActorId()));
@@ -68,6 +70,20 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
     setBlockedReason('');
     setDeclineRationale('');
     router.refresh();
+  }
+
+  async function reassign() {
+    setBusy(true);
+    setBusyAction('reassign-confirm');
+    setError(null);
+    try {
+      const res = await reassignServiceRequest(req.id, newOwner);
+      if (res.error) fail(typeof res.error === 'string' ? res.error : 'Reassign failed.');
+      else done(`Reassigned to ${newOwner}.`);
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
+    }
   }
 
   function fail(message: string) {
@@ -141,6 +157,14 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
     (req.status === 'Submitted' ||
       req.status === 'In Progress' ||
       req.status === 'Blocked');
+
+  const canReassign =
+    (isHandler || isAdmin) &&
+    req.status !== 'Resolved' &&
+    req.status !== 'Declined';
+  const ownerOptions = TEACHING_ACTORS.filter(
+    (a) => (a.role === 'handler' || (a.role as string) === 'operator') && a.department === req.category,
+  );
 
   const labelFor = (key: string, fallback: string) =>
     busy && busyAction === key ? 'Working…' : fallback;
@@ -249,6 +273,17 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
             className="rounded-lg border border-rose-400/40 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50"
           >
             Decline
+          </button>
+        )}
+        {canReassign && ownerOptions.length > 0 && (
+          <button
+            type="button"
+            disabled={busy}
+            aria-expanded={expanded === 'reassign'}
+            onClick={() => setExpanded((p) => (p === 'reassign' ? null : 'reassign'))}
+            className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+          >
+            Reassign
           </button>
         )}
         {isApprover && req.status !== 'Pending Approval' && (
@@ -388,6 +423,56 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
               onClick={() => {
                 setExpanded(null);
                 setDeclineRationale('');
+              }}
+              className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-300 hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {expanded === 'reassign' && canReassign && (
+        <form
+          aria-label={`Reassign ${req.title}`}
+          className="mt-4 rounded-lg border border-slate-600 bg-slate-900 p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void reassign();
+          }}
+        >
+          <label
+            htmlFor={`detail-owner-${req.id}`}
+            className="block text-xs font-semibold uppercase tracking-wide text-slate-300"
+          >
+            New owner ({req.category} handlers only)
+          </label>
+          <select
+            id={`detail-owner-${req.id}`}
+            value={newOwner}
+            onChange={(e) => setNewOwner(e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none"
+          >
+            <option value="">Select…</option>
+            {ownerOptions.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} · {a.id}
+              </option>
+            ))}
+          </select>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="submit"
+              disabled={busy || !newOwner}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+            >
+              {busy && busyAction === 'reassign-confirm' ? 'Working…' : 'Confirm reassign'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(null);
+                setNewOwner(req.ownerId ?? '');
               }}
               className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-300 hover:bg-slate-700"
             >

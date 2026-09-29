@@ -32,10 +32,12 @@ import {
   ALLOWED_TRANSITIONS,
   SENSITIVE_CATEGORIES,
   approverForCategory,
+  getTeachingActor,
   isAdminRole,
   isApproverRole,
   isHandlerRole,
   isRequesterRole,
+  isTeachingActorId,
   requiresAutoApproval,
   resolveTeachingActor,
 } from '@internal/shared';
@@ -618,6 +620,79 @@ export class ServiceRequestsService {
     this.notifications.notify('request.declined', {
       requestId: id,
       from: currentStatus,
+      actorId,
+    });
+    return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
+  }
+
+  /**
+   * Slice 5 — authorized reassignment within the ticket's department queue.
+   * Handler/admin only; terminal states 422. The new owner must be a known
+   * teaching handler serving the request's queue category (cross-department
+   * or non-handler targets are 403; unknown ids are 400). Actor confinement
+   * is inherited from findOne (handlers only see their own department).
+   */
+  async reassign(
+    id: string,
+    dto: { ownerId?: string },
+    actor?: ActorInput,
+  ): Promise<SharedServiceRequest> {
+    const resolved = this.requireResolved(actor);
+    if (!isOperatorRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: handler role required');
+    }
+    const ownerId = dto.ownerId?.trim();
+    if (!ownerId) {
+      throw new BadRequestException('A new ownerId is required.');
+    }
+    if (!isTeachingActorId(ownerId)) {
+      throw new BadRequestException(`Unknown owner: ${ownerId}.`);
+    }
+    const request = await this.findOne(id, resolved);
+    if (request.status === 'Resolved' || request.status === 'Declined') {
+      throw new UnprocessableEntityException(
+        'Request is immutable and cannot be updated',
+      );
+    }
+    if (!request.queueId) {
+      throw new ForbiddenException('Forbidden: request has no department queue');
+    }
+    const queue = await this.prisma.queue.findUnique({
+      where: { id: request.queueId },
+    });
+    if (!queue) {
+      throw new ForbiddenException('Forbidden: request has no department queue');
+    }
+    const target = getTeachingActor(ownerId);
+    if (!target || !isHandlerRole(target.role) || target.department !== queue.category) {
+      throw new ForbiddenException(
+        `Forbidden: ${ownerId} does not serve the ${queue.category} queue`,
+      );
+    }
+    const actorId = resolved.userId;
+    const previous = request.ownerId;
+    const row = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceRequest.update({
+        where: { id },
+        data: { ownerId } as never,
+      });
+      await tx.auditEntry.create({
+        data: {
+          requestId: id,
+          actorId,
+          // Owner lineage rides the generic from/to slots (rendered as
+          // `old → new` in the timeline); the action marks the kind.
+          from: previous,
+          to: ownerId,
+          action: 'reassigned',
+        },
+      });
+      return updated;
+    });
+    this.notifications.notify('request.reassigned', {
+      requestId: id,
+      from: previous,
+      to: ownerId,
       actorId,
     });
     return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
