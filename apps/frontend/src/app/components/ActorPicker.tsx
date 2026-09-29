@@ -6,7 +6,7 @@ import { TEACHING_ACTORS, USER_ID_HEADER } from '@internal/shared';
 
 const COOKIE = USER_ID_HEADER;
 
-type PickerMode = 'landing' | 'sidebar';
+export type PickerMode = 'landing' | 'sidebar';
 
 function readCookie(name: string): string {
   if (typeof document === 'undefined') return '';
@@ -26,7 +26,7 @@ function writeActorCookie(value: string) {
   document.cookie = 'x-user-dept=; path=/; max-age=0';
 }
 
-export default function ActorPicker({ mode }: { mode: PickerMode }) {
+export function useActorPicker(mode: PickerMode) {
   const router = useRouter();
   const pathname = usePathname();
   const [actorId, setActorId] = useState('');
@@ -66,10 +66,23 @@ export default function ActorPicker({ mode }: { mode: PickerMode }) {
     router.refresh();
   }
 
-  if (!ready) return null;
-
   const current = TEACHING_ACTORS.find((actor) => actor.id === actorId);
+
+  return {
+    actorId,
+    current,
+    isSwitching,
+    ready,
+    selectActor,
+    logOff,
+  };
+}
+
+export default function ActorPicker({ mode }: { mode: PickerMode }) {
+  const { actorId, current, isSwitching, ready, selectActor, logOff } = useActorPicker(mode);
   const isLanding = mode === 'landing';
+
+  if (!ready) return null;
 
   return (
     <div className={isLanding ? 'w-full max-w-md space-y-5' : 'flex flex-wrap items-center gap-2'}>
@@ -93,9 +106,7 @@ export default function ActorPicker({ mode }: { mode: PickerMode }) {
         onChange={(event) => selectActor(event.target.value)}
         disabled={isSwitching}
         aria-label={isLanding ? 'Select a role' : undefined}
-        className={isLanding
-          ? 'w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none'
-          : 'min-w-0 flex-1 rounded-lg border border-indigo-700 bg-indigo-900 px-2 py-1.5 text-xs text-white focus:border-blue-400 focus:outline-none'}
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 disabled:cursor-wait disabled:opacity-60"
       >
         <option value="">Select actor…</option>
         {TEACHING_ACTORS.map((actor) => (
