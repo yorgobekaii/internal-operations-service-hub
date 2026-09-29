@@ -35,6 +35,31 @@ npm run setup
 npm run start:backend
 ```
 
+### **Environment Configuration**
+
+Local defaults are provided automatically. Copy the examples when you need to
+override them:
+
+```bash
+# Backend: apps/backend/.env
+Copy-Item apps/backend/.env.example apps/backend/.env   # PowerShell
+
+# Frontend: apps/frontend/.env.local
+Copy-Item apps/frontend/.env.example apps/frontend/.env.local   # PowerShell
+```
+
+| Variable | Default | Used by |
+| :--- | :--- | :--- |
+| `PORT` | `3000` | NestJS backend listener |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3000` | Next.js API origin |
+| `DATABASE_URL` | `file:./dev.db` | Prisma SQLite database |
+| `AI_PROVIDER` | `mock` | Advisory triage provider |
+
+`PORT` accepts a valid TCP port and falls back to `3000` for invalid values.
+The local development target is the backend on port `3000` and frontend on port
+`3001`; staged or production deployments must provide their own environment
+values and must not use the local SQLite/demo defaults.
+
 ### **1. Install Dependencies**
 
 ```bash
@@ -61,12 +86,12 @@ npm run prisma:push --workspace=@internal/backend
 npm run start:backend
 ```
 
-The NestJS API will be available at **`http://localhost:3000`**. (`start:backend` rebuilds the shared contract automatically, so step 2 only needs to run once.) Health check:
+The NestJS API will be available at **`http://localhost:3000`** unless `PORT` is configured. (`start:backend` rebuilds the shared contract automatically, so step 2 only needs to run once.) Health check:
 
 ```bash
-curl http://localhost:3000/service-requests
+curl http://localhost:3000/health
 ```
-*Expected: `200 OK` with `[]` or a JSON array.*
+*Expected: `200 OK` with `{ "status": "ok", "timestamp": "..." }`. The endpoint is public and intentionally isolated from teaching-identity RBAC.*
 
 ### **4. Start the Frontend**
 
@@ -171,6 +196,29 @@ All 86 tests (45 unit + 41 e2e) must pass. (`docs/week3-full-stack-delivery.md` 
 ```bash
 npm run eval:triage
 ```
+
+### **7. Verify a Release Candidate**
+
+The unified release gate runs the shared build, Prisma validation, backend
+build, frontend lint/build, unit tests, isolated integration tests, all 8 AI
+evals, an isolated browser smoke suite, and the public health check:
+
+```bash
+npm run verify:release
+```
+
+The gate uses `apps/backend/prisma/playwright.db` for browser verification and
+forces the deterministic mock AI provider. It does not use or rewrite the
+tracked development database. Browser tests require the Playwright Chromium
+runtime; install it once with:
+
+```bash
+npx playwright install chromium
+```
+
+See [docs/week5-release-operations.md](docs/week5-release-operations.md) for
+release-candidate identity, observability, incident recovery, and stranger
+handoff instructions.
 
 **Groq (real LLM, optional):** default `AI_PROVIDER=mock` needs no key. Yes — the right procedure is putting values in `apps/backend/.env` (the backend loads that file automatically on boot, no export needed):
 

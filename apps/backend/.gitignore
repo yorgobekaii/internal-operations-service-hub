@@ -6,5 +6,7 @@ node_modules
 # Isolated e2e database (never commit test artefacts)
 prisma/test.db
 prisma/test.db-journal
+prisma/playwright.db
+prisma/playwright.db-journal
 
 /src/generated/prisma

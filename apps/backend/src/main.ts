@@ -21,6 +21,10 @@ async function bootstrap() {
       transform: true,
     }),
   );
-  await app.listen(3000);
+  const configuredPort = Number.parseInt(process.env.PORT ?? '3000', 10);
+  const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536
+    ? configuredPort
+    : 3000;
+  await app.listen(port);
 }
 bootstrap();

@@ -114,6 +114,13 @@ describe('AppController (e2e) [isolated test.db]', () => {
     return { [USER_ID_HEADER]: actor };
   }
 
+  it('Health endpoint is public and returns a timestamped ok response', async () => {
+    const response = await request(app.getHttpServer()).get('/health').expect(200);
+
+    expect(response.body.status).toBe('ok');
+    expect(Number.isNaN(Date.parse(response.body.timestamp))).toBe(false);
+  });
+
   async function createRequest(title = 'E2E Test DB', category = 'Finance', actor = MAYA) {
     const res = await request(app.getHttpServer())
       .post('/service-requests')
