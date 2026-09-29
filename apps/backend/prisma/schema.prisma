@@ -36,6 +36,7 @@ model User {
   role       String   @default("requester")
   department String?
   active     Boolean  @default(true)
+  pickerVisible Boolean @default(true)
   departmentId String?
   departmentRef Department? @relation(fields: [departmentId], references: [id])
   createdAt  DateTime @default(now())

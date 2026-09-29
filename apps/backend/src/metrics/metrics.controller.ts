@@ -1,6 +1,6 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import { MetricsService } from './metrics.service';
-import { RequireActorGuard, resolvedActorFromRequest } from '../service-requests/auth.guard';
+import { RequireActorGuard, RequireAdminGuard, resolvedActorFromRequest } from '../service-requests/auth.guard';
 
 @Controller('metrics')
 export class MetricsController {
@@ -12,5 +12,11 @@ export class MetricsController {
     return this.metricsService.getQueueHealth(
       resolvedActorFromRequest(req),
     );
+  }
+
+  @Get('calendar')
+  @UseGuards(RequireAdminGuard)
+  async calendar(@Req() req: unknown, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.metricsService.getCalendar(resolvedActorFromRequest(req), from, to);
   }
 }

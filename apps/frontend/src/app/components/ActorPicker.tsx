@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { USER_ID_HEADER } from '@internal/shared';
-import { useRuntimeActors } from './actor-registry';
+import { useCurrentActor, useRuntimeActors } from './actor-registry';
 
 const COOKIE = USER_ID_HEADER;
 
@@ -34,6 +34,7 @@ export function useActorPicker(mode: PickerMode) {
   const [ready, setReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const actors = useRuntimeActors();
+  const { actor: resolvedCurrent } = useCurrentActor();
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -68,7 +69,7 @@ export function useActorPicker(mode: PickerMode) {
     router.refresh();
   }
 
-  const current = actors.find((actor) => actor.id === actorId);
+  const current = actors.find((actor) => actor.id === actorId) ?? resolvedCurrent;
 
   return {
     actorId,

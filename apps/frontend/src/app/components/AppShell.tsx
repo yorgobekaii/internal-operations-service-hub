@@ -45,9 +45,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
       <div className="flex min-h-screen flex-1 flex-col md:ml-64">
         <div className="flex-1">{children}</div>
-        <footer className="border-t border-slate-200 bg-white px-6 py-4 text-xs text-slate-500">
-          Advisory AI triage only — backend rules own routing and state.
-        </footer>
       </div>
     </div>
   );

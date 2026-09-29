@@ -29,6 +29,7 @@ export class TeachingIdentityService implements OnModuleInit {
           role: actor.role,
           department: actor.department,
           departmentId: department?.id ?? null,
+          pickerVisible: true,
         },
       });
     }
@@ -63,9 +64,16 @@ export class TeachingIdentityService implements OnModuleInit {
 
   async listActive() {
     return this.prisma.user.findMany({
-      where: { active: true },
-      select: { id: true, name: true, email: true, role: true, department: true, active: true },
+      where: { active: true, pickerVisible: true },
+      select: { id: true, name: true, email: true, role: true, department: true, active: true, pickerVisible: true },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });
+  }
+
+  async current(userId: string | undefined) {
+    const actor = await this.resolve(userId);
+    if (!actor) return undefined;
+    const user = await this.prisma.user.findUnique({ where: { id: actor.userId }, select: { id: true, name: true, email: true, role: true, department: true, active: true, pickerVisible: true } });
+    return user ?? { id: actor.userId, name: actor.displayName.split(' · ')[0], email: '', role: actor.role, department: actor.department, active: true, pickerVisible: true };
   }
 }

@@ -154,4 +154,38 @@ export class MetricsService {
       perQueue,
     };
   }
+
+  async getCalendar(actor: ActorInput | undefined, fromInput?: string, toInput?: string) {
+    const resolved = this.requirePrivileged(actor);
+    if (!isAdminRole(resolved.role)) throw new ForbiddenException('Forbidden: admin role required');
+    const now = new Date();
+    const defaultFrom = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
+    const from = fromInput ? new Date(`${fromInput}T00:00:00.000Z`) : defaultFrom;
+    const to = toInput ? new Date(`${toInput}T23:59:59.999Z`) : now;
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) throw new ForbiddenException('Invalid calendar date range.');
+    const [requests, audits] = await Promise.all([this.prisma.serviceRequest.findMany(), this.prisma.auditEntry.findMany({ where: { createdAt: { gte: from, lte: to } }, orderBy: { createdAt: 'asc' } })]);
+    const requestMap = new Map(requests.map((request) => [request.id, request]));
+    const days: Array<{ date: string; created: number; resolved: number; declined: number; breached: number; cycleValues: number[] }> = [];
+    for (let cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate())); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const date = cursor.toISOString().slice(0, 10);
+      days.push({ date, created: 0, resolved: 0, declined: 0, breached: 0, cycleValues: [] });
+    }
+    const byDate = new Map(days.map((day) => [day.date, day]));
+    for (const request of requests) {
+      const day = byDate.get(request.createdAt.toISOString().slice(0, 10));
+      if (day) day.created += 1;
+      const dueDay = request.slaDueAt?.toISOString().slice(0, 10);
+      if (dueDay && request.slaDueAt && request.slaDueAt < now && request.status !== 'Resolved' && request.status !== 'Declined') {
+        const due = byDate.get(dueDay); if (due) due.breached += 1;
+      }
+    }
+    for (const audit of audits) {
+      const day = byDate.get(audit.createdAt.toISOString().slice(0, 10));
+      if (!day) continue;
+      const request = requestMap.get(audit.requestId);
+      if (audit.to === 'Resolved') { day.resolved += 1; if (request) day.cycleValues.push((audit.createdAt.getTime() - request.createdAt.getTime()) / HOUR_MS); }
+      if (audit.to === 'Declined' || audit.action === 'rejected') day.declined += 1;
+    }
+    return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), days: days.map((day) => ({ date: day.date, created: day.created, resolved: day.resolved, declined: day.declined, breached: day.breached, averageCycleHours: mean(day.cycleValues) })) };
+  }
 }

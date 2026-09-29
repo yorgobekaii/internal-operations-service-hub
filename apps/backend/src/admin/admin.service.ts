@@ -33,7 +33,7 @@ export class AdminService {
     const department = dto.departmentId ? await this.prisma.department.findUnique({ where: { id: dto.departmentId } }) : null;
     if (dto.departmentId && !department) throw new BadRequestException('Department not found.');
     return this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({ data: { id: dto.id.trim(), name: dto.name.trim(), email: dto.email.trim(), role: dto.role, department: department?.name, departmentId: department?.id } });
+      const user = await tx.user.create({ data: { id: dto.id.trim(), name: dto.name.trim(), email: dto.email.trim(), role: dto.role, department: department?.name, departmentId: department?.id, pickerVisible: dto.pickerVisible ?? true } });
       await this.audit(tx, admin.userId, 'user', user.id, 'created', null, user);
       return user;
     });
@@ -50,7 +50,7 @@ export class AdminService {
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.update({ where: { id }, data: {
         name: dto.name?.trim(), email: dto.email?.trim(), role: dto.role,
-        active: dto.active, department: department ? department.name : undefined, departmentId: dto.departmentId,
+        active: dto.active, pickerVisible: dto.pickerVisible, department: department ? department.name : undefined, departmentId: dto.departmentId,
       }});
       await this.audit(tx, admin.userId, 'user', id, 'updated', before, user);
       return user;
@@ -117,6 +117,18 @@ export class AdminService {
       const department = await tx.department.update({ where: { id }, data: { active: false } });
       await tx.departmentCategoryMapping.updateMany({ where: { departmentId: id }, data: { active: false } });
       await this.audit(tx, admin.userId, 'department', id, 'archived', before, department);
+      return department;
+    });
+  }
+
+  async unarchiveDepartment(id: string, actor?: ResolvedActor) {
+    const admin = this.requireAdmin(actor);
+    const before = await this.prisma.department.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException('Department not found.');
+    return this.prisma.$transaction(async (tx) => {
+      const department = await tx.department.update({ where: { id }, data: { active: true } });
+      await tx.departmentCategoryMapping.updateMany({ where: { departmentId: id }, data: { active: true } });
+      await this.audit(tx, admin.userId, 'department', id, 'unarchived', before, department);
       return department;
     });
   }

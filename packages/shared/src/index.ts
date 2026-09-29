@@ -74,6 +74,7 @@ export interface User {
   role: string;
   department?: string | null;
   active?: boolean;
+  pickerVisible?: boolean;
   createdAt: string | Date;
   updatedAt: string | Date;
 }
@@ -362,6 +363,7 @@ export const SERVICE_REQUEST_ROUTES = {
 export const APPROVALS_ROUTE = '/approvals';
 
 export const METRICS_ROUTE = '/metrics/queue-health';
+export const PERFORMANCE_CALENDAR_ROUTE = '/metrics/calendar';
 
 export interface QueueHealth {
   queueId: string | null;
@@ -389,6 +391,21 @@ export interface QueueHealthReport {
   perQueue: QueueHealth[];
 }
 
+export interface DailyPerformance {
+  date: string;
+  created: number;
+  resolved: number;
+  declined: number;
+  breached: number;
+  averageCycleHours: number | null;
+}
+
+export interface PerformanceCalendar {
+  from: string;
+  to: string;
+  days: DailyPerformance[];
+}
+
 export const QUEUE_ROUTES = {
   base: '/queues',
   byId: (id: string) => `/queues/${id}`,
@@ -407,10 +424,12 @@ export const ADMIN_ROUTES = {
   departments: '/admin/departments',
   departmentById: (id: string) => `/admin/departments/${id}`,
   archiveDepartment: (id: string) => `/admin/departments/${id}/archive`,
+  unarchiveDepartment: (id: string) => `/admin/departments/${id}/unarchive`,
   categoryMapping: (category: string) => `/admin/category-mappings/${category}`,
   settings: '/admin/settings',
   audit: '/admin/audit',
   actors: '/actors',
+  currentActor: '/actors/me',
 } as const;
 
 export const USER_DEPT_HEADER = 'x-user-dept';

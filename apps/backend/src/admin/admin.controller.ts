@@ -15,6 +15,7 @@ export class AdminController {
   @Post('departments') createDepartment(@Body() dto: CreateDepartmentDto, @Req() req: unknown) { return this.admin.createDepartment(dto, resolvedActorFromRequest(req)); }
   @Patch('departments/:id') updateDepartment(@Param('id') id: string, @Body() dto: UpdateDepartmentDto, @Req() req: unknown) { return this.admin.updateDepartment(id, dto, resolvedActorFromRequest(req)); }
   @Post('departments/:id/archive') archiveDepartment(@Param('id') id: string, @Req() req: unknown) { return this.admin.archiveDepartment(id, resolvedActorFromRequest(req)); }
+  @Post('departments/:id/unarchive') unarchiveDepartment(@Param('id') id: string, @Req() req: unknown) { return this.admin.unarchiveDepartment(id, resolvedActorFromRequest(req)); }
   @Put('category-mappings/:category') mapping(@Param('category') category: string, @Body() dto: UpdateMappingDto, @Req() req: unknown) { return this.admin.updateMapping(category, dto, resolvedActorFromRequest(req)); }
   @Get('settings') settings(@Req() req: unknown) { return this.admin.settings(resolvedActorFromRequest(req)); }
   @Patch('settings') updateSettings(@Body() dto: UpdateSettingsDto, @Req() req: unknown) { return this.admin.updateSettings(dto, resolvedActorFromRequest(req)); }

@@ -6,6 +6,7 @@ export class CreateUserDto {
   @IsEmail() email!: string;
   @IsString() role!: string;
   @IsOptional() @IsString() departmentId?: string;
+  @IsOptional() @IsBoolean() pickerVisible?: boolean;
 }
 
 export class UpdateUserDto {
@@ -14,6 +15,7 @@ export class UpdateUserDto {
   @IsOptional() @IsString() role?: string;
   @IsOptional() @IsString() departmentId?: string;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsBoolean() pickerVisible?: boolean;
 }
 
 export class DeactivateUserDto {
