@@ -181,6 +181,7 @@ export async function approveServiceRequest(id: string) {
 
     revalidatePath('/');
     revalidatePath('/approvals');
+    revalidatePath(`/requests/${id}`);
     return { success: true };
   } catch {
     return { error: 'Failed to connect to backend' };
@@ -206,6 +207,7 @@ export async function rejectServiceRequest(id: string, rationale: string) {
 
     revalidatePath('/');
     revalidatePath('/approvals');
+    revalidatePath(`/requests/${id}`);
     return { success: true };
   } catch {
     return { error: 'Failed to connect to backend' };

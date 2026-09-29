@@ -9,6 +9,7 @@ import {
 } from '@internal/shared';
 import { categoryBadge, priorityBadge, statusBadge } from '../../components/badges';
 import CommentForm from '../../components/CommentForm';
+import RequestActions from '../../components/RequestActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,6 +144,8 @@ export default async function RequestDetailPage({
           </section>
         ) : null;
       })()}
+
+      <RequestActions req={req} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
