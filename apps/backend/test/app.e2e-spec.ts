@@ -48,6 +48,7 @@ describe('AppController (e2e) [isolated test.db]', () => {
     prisma = app.get(PrismaService);
     // Start clean inside the isolated DB.
     await prisma.auditEntry.deleteMany({}).catch(() => undefined);
+    await prisma.notification.deleteMany({}).catch(() => undefined);
     await prisma.approvalStep.deleteMany({}).catch(() => undefined);
     await prisma.comment.deleteMany({}).catch(() => undefined);
     await prisma.serviceRequest.deleteMany({});
@@ -1284,5 +1285,46 @@ describe('AppController (e2e) [isolated test.db]', () => {
       expect.arrayContaining(['IT']),
     );
     expect(scoped.body.perQueue.map((q: { category: string }) => q.category)).not.toContain('HR');
+  });
+
+  it('notifications are persisted, actor-scoped, and markable as read', async () => {
+    const created = await createRequest('Notification scope test', 'IT', MAYA);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${created.body.id}/status`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ status: 'In Progress' })
+      .expect(200);
+
+    const mayaInbox = await request(app.getHttpServer())
+      .get('/notifications')
+      .set(USER_ID_HEADER, MAYA)
+      .expect(200);
+    const notification = mayaInbox.body.notifications.find(
+      (item: { requestId: string }) => item.requestId === created.body.id,
+    );
+    expect(notification).toBeDefined();
+    expect(mayaInbox.body.unreadCount).toBeGreaterThanOrEqual(1);
+
+    await request(app.getHttpServer())
+      .get('/notifications')
+      .set(USER_ID_HEADER, THEO)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.notifications).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: notification.id })]),
+        );
+      });
+
+    const read = await request(app.getHttpServer())
+      .patch(`/notifications/${notification.id}/read`)
+      .set(USER_ID_HEADER, MAYA)
+      .expect(200);
+    expect(read.body.readAt).toBeDefined();
+
+    await request(app.getHttpServer())
+      .patch(`/notifications/${notification.id}/read`)
+      .set(USER_ID_HEADER, THEO)
+      .expect(404);
+    await request(app.getHttpServer()).get('/notifications').expect(403);
   });
 });

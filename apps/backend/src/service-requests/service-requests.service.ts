@@ -235,11 +235,16 @@ export class ServiceRequestsService {
       });
       return created;
     });
-    this.notifications.notify(autoGate ? 'request.gated' : 'request.created', {
+    await this.notifications.fanOut({
+      event: 'request.created',
       requestId: row.id,
-      category: createDto.category,
-      priority,
+      title: row.title,
       actorId,
+      requesterId: row.requesterId,
+      ownerId: row.ownerId,
+      backupOwnerId: row.backupOwnerId,
+      approverId: designated,
+      to: initialStatus,
     });
     return toContract(row);
   }
@@ -397,11 +402,16 @@ export class ServiceRequestsService {
       });
       return updated;
     });
-    this.notifications.notify('request.status_changed', {
+    await this.notifications.fanOut({
+      event: 'request.status_changed',
       requestId: id,
+      title: request.title,
+      actorId,
+      requesterId: request.requesterId,
+      ownerId: request.ownerId,
+      backupOwnerId: request.backupOwnerId,
       from: currentStatus,
       to: nextStatus,
-      actorId,
     });
     return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
   }
@@ -493,7 +503,18 @@ export class ServiceRequestsService {
       });
       return updated;
     });
-    this.notifications.notify('request.approved', { requestId: id, approver });
+    await this.notifications.fanOut({
+      event: 'request.approved',
+      requestId: id,
+      title: raw.title,
+      actorId: approver,
+      requesterId: raw.requesterId,
+      ownerId: raw.ownerId,
+      backupOwnerId: raw.backupOwnerId,
+      approverId: approver,
+      from: 'Pending Approval',
+      to: 'In Progress',
+    });
     return toContract(row);
   }
 
@@ -553,7 +574,17 @@ export class ServiceRequestsService {
       });
       return updated;
     });
-    this.notifications.notify('request.rejected', { requestId: id, approver });
+    await this.notifications.fanOut({
+      event: 'request.rejected',
+      requestId: id,
+      title: raw.title,
+      actorId: approver,
+      requesterId: raw.requesterId,
+      ownerId: raw.ownerId,
+      approverId: approver,
+      from: 'Pending Approval',
+      to: 'Declined',
+    });
     return toContract(row);
   }
 
@@ -629,10 +660,16 @@ export class ServiceRequestsService {
       });
       return updated;
     });
-    this.notifications.notify('request.declined', {
+    await this.notifications.fanOut({
+      event: 'request.declined',
       requestId: id,
-      from: currentStatus,
+      title: request.title,
       actorId,
+      requesterId: request.requesterId,
+      ownerId: request.ownerId,
+      backupOwnerId: request.backupOwnerId,
+      from: currentStatus,
+      to: 'Declined',
     });
     return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
   }
@@ -701,11 +738,16 @@ export class ServiceRequestsService {
       });
       return updated;
     });
-    this.notifications.notify('request.reassigned', {
+    await this.notifications.fanOut({
+      event: 'request.reassigned',
       requestId: id,
+      title: request.title,
+      actorId,
+      requesterId: request.requesterId,
+      ownerId: previous,
+      backupOwnerId: request.backupOwnerId,
       from: previous,
       to: ownerId,
-      actorId,
     });
     return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
   }
@@ -782,7 +824,7 @@ export class ServiceRequestsService {
     actor?: ActorInput,
   ): Promise<SharedComment> {
     const resolved = this.requireResolved(actor);
-    await this.findOne(id, resolved);
+    const request = await this.findOne(id, resolved);
     const body = dto.body?.trim();
     if (!body) {
       throw new BadRequestException('Comment body is required.');
@@ -804,7 +846,15 @@ export class ServiceRequestsService {
       });
       return created;
     });
-    this.notifications.notify('request.commented', { requestId: id, author });
+    await this.notifications.fanOut({
+      event: 'request.commented',
+      requestId: id,
+      title: request.title,
+      actorId: author,
+      requesterId: request.requesterId,
+      ownerId: request.ownerId,
+      backupOwnerId: request.backupOwnerId,
+    });
     return toCommentContract(row);
   }
 }

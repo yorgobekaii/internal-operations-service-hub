@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import RoleSwitcher from './RoleSwitcher';
+import NotificationBell from './NotificationBell';
 
 function NavLink({ href, label }: { href: string; label: string }) {
   return (
@@ -36,6 +37,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <NavLink href="/approvals" label="Approvals" />
           <NavLink href="/queues" label="Queues" />
           <NavLink href="/admin" label="Admin" />
+          <NotificationBell />
         </nav>
         <div className="border-t border-indigo-900 px-4 py-4 md:mt-auto">
           <RoleSwitcher />

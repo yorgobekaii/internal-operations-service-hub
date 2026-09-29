@@ -151,6 +151,25 @@ export interface Comment {
   createdAt: string | Date;
 }
 
+export type NotificationEvent =
+  | 'request.created'
+  | 'request.status_changed'
+  | 'request.approved'
+  | 'request.rejected'
+  | 'request.declined'
+  | 'request.reassigned'
+  | 'request.commented';
+
+export interface Notification {
+  id: string;
+  actorId: string;
+  requestId: string;
+  event: NotificationEvent | string;
+  message: string;
+  readAt: string | Date | null;
+  createdAt: string | Date;
+}
+
 export interface CreateCommentDto {
   body: string;
   authorId?: string;
@@ -374,6 +393,11 @@ export const QUEUE_ROUTES = {
   base: '/queues',
   byId: (id: string) => `/queues/${id}`,
   requestsByQueue: (id: string) => `/queues/${id}/requests`,
+} as const;
+
+export const NOTIFICATION_ROUTES = {
+  base: '/notifications',
+  readById: (id: string) => `/notifications/${id}/read`,
 } as const;
 
 export const ADMIN_ROUTES = {

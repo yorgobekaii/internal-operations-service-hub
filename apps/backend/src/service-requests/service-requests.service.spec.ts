@@ -121,7 +121,7 @@ describe('ServiceRequestsService', () => {
         },
         {
           provide: NotificationsService,
-          useValue: { notify: jest.fn() },
+          useValue: { notify: jest.fn(), fanOut: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
