@@ -5,6 +5,7 @@ import { UpdateServiceRequestStatusDto } from './dto/update-service-request-stat
 import { CreateCommentDto } from './dto/create-comment.dto';
 import {
   ApproveServiceRequestDto,
+  DeclineServiceRequestDto,
   RejectServiceRequestDto,
 } from './dto/decision.dto';
 import { AiTriageRequestDto } from './dto/ai-triage-request.dto';
@@ -124,6 +125,29 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.reject(
       id,
       dto ?? {},
+      resolvedActorFromRequest(req),
+    );
+  }
+
+  @Post(':id/decline')
+  @UseGuards(RequireHandlerGuard)
+  async decline(
+    @Param('id') id: string,
+    @Body() dto: DeclineServiceRequestDto,
+    @Req() req: unknown,
+  ) {
+    return this.serviceRequestsService.decline(
+      id,
+      dto ?? {},
+      resolvedActorFromRequest(req),
+    );
+  }
+
+  @Get(':id/approvals')
+  @UseGuards(RequireActorGuard)
+  async listApprovals(@Param('id') id: string, @Req() req: unknown) {
+    return this.serviceRequestsService.listApprovalSteps(
+      id,
       resolvedActorFromRequest(req),
     );
   }

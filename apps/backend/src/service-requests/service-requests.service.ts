@@ -531,6 +531,105 @@ export class ServiceRequestsService {
     return toContract(row);
   }
 
+  /**
+   * Slice 2 — handler decline outside the approval gate.
+   * Legal from Submitted / In Progress / Blocked (per ALLOWED_TRANSITIONS);
+   * Pending Approval must go through approve()/reject() so the designated
+   * approver decision + rationale stay authoritative. Terminal states 422.
+   */
+  async decline(
+    id: string,
+    dto: { rationale?: string },
+    actor?: ActorInput,
+  ): Promise<SharedServiceRequest> {
+    const resolved = this.requireResolved(actor);
+    if (!isOperatorRole(resolved.role)) {
+      throw new ForbiddenException('Forbidden: handler role required');
+    }
+    const rationale = dto.rationale?.trim();
+    if (!rationale) {
+      throw new BadRequestException('A decline rationale is required.');
+    }
+    const request = await this.findOne(id, resolved);
+    const currentStatus = request.status;
+    if (currentStatus === 'Resolved' || currentStatus === 'Declined') {
+      throw new UnprocessableEntityException(
+        'Request is immutable and cannot be updated',
+      );
+    }
+    if (
+      currentStatus !== 'Submitted' &&
+      currentStatus !== 'In Progress' &&
+      currentStatus !== 'Blocked'
+    ) {
+      throw new BadRequestException(
+        'Only Submitted, In Progress or Blocked requests can be declined here. Pending Approval requires an approver decision.',
+      );
+    }
+    const actorId = resolved.userId;
+    const row = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceRequest.update({
+        where: { id },
+        data: { status: 'Declined', blockedReason: null } as never,
+      });
+      // Close any stray open steps so the gate can never reopen silently.
+      await tx.approvalStep.updateMany({
+        where: { requestId: id, status: 'pending' },
+        data: {
+          status: 'rejected',
+          approverId: actorId,
+          rationale,
+          decidedAt: new Date(),
+        },
+      });
+      // Record the human-readable rationale alongside the transition.
+      await tx.approvalStep.create({
+        data: {
+          requestId: id,
+          approverId: actorId,
+          status: 'rejected',
+          rationale,
+          decidedAt: new Date(),
+        },
+      });
+      await tx.auditEntry.create({
+        data: {
+          requestId: id,
+          actorId,
+          from: currentStatus,
+          to: 'Declined',
+          action: 'status_changed',
+        },
+      });
+      return updated;
+    });
+    this.notifications.notify('request.declined', {
+      requestId: id,
+      from: currentStatus,
+      actorId,
+    });
+    return this.redactForAdmin(toContract(row), await this.resolveScope(resolved));
+  }
+
+  /** Slice 2 — approval steps for rationale visibility (scoped via findOne). */
+  async listApprovalSteps(id: string, actor?: ActorInput) {
+    await this.findOne(id, actor);
+    const rows = await this.prisma.approvalStep.findMany({
+      where: { requestId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      requestId: r.requestId,
+      approverId: r.approverId,
+      status: r.status,
+      rationale: r.rationale,
+      decidedAt: r.decidedAt,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
   async findApprovals(actor?: ActorInput): Promise<SharedServiceRequest[]> {
     const scope = await this.resolveScope(actor);
     if (scope.mode === 'own') {

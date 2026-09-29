@@ -551,6 +551,97 @@ describe('ServiceRequestsService', () => {
       ).rejects.toThrow('Only requests pending approval can be rejected');
     });
 
+    it('decline() moves Submitted/In Progress/Blocked to Declined with rationale audit', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'In Progress', queueId: 'queue-it' }));
+      mockTx.serviceRequest.update.mockResolvedValue(
+        buildRow({ status: 'Declined', queueId: 'queue-it' }),
+      );
+
+      const result = await service.decline(
+        'test-id',
+        { rationale: 'Duplicate ticket' },
+        NORA,
+      );
+
+      expect(result.status).toBe('Declined');
+      expect(mockTx.serviceRequest.update).toHaveBeenCalledWith({
+        where: { id: 'test-id' },
+        data: expect.objectContaining({ status: 'Declined' }),
+      });
+      expect(mockTx.approvalStep.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          requestId: 'test-id',
+          status: 'rejected',
+          rationale: 'Duplicate ticket',
+        }),
+      });
+      expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          from: 'In Progress',
+          to: 'Declined',
+          action: 'status_changed',
+        }),
+      });
+    });
+
+    it('decline() requires rationale, forbids non-operators, refuses gate + terminals', async () => {
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Submitted', queueId: 'queue-it' }));
+
+      await expect(service.decline('test-id', { rationale: '' }, NORA)).rejects.toThrow(
+        'A decline rationale is required.',
+      );
+      await expect(service.decline('test-id', {}, NORA)).rejects.toThrow(
+        'A decline rationale is required.',
+      );
+      await expect(
+        service.decline('test-id', { rationale: 'x' }, MAYA),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.decline('test-id', { rationale: 'x' }, LINA),
+      ).rejects.toThrow(ForbiddenException);
+
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Pending Approval', queueId: 'queue-it' }));
+      await expect(
+        service.decline('test-id', { rationale: 'x' }, NORA),
+      ).rejects.toThrow('Only Submitted, In Progress or Blocked requests can be declined here');
+
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Resolved', queueId: 'queue-it' }));
+      await expect(
+        service.decline('test-id', { rationale: 'x' }, NORA),
+      ).rejects.toThrow('Request is immutable and cannot be updated');
+    });
+
+    it('listApprovalSteps returns steps oldest-first after scope check', async () => {
+      const steps = [
+        {
+          id: 'step-1',
+          requestId: 'test-id',
+          approverId: 'lina.finance-approver',
+          status: 'rejected',
+          rationale: 'Over budget',
+          decidedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ];
+      jest
+        .spyOn(prisma.serviceRequest, 'findUnique')
+        .mockResolvedValue(buildRow({ status: 'Declined', queueId: 'queue-it' }));
+      jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue(steps);
+
+      const result = await service.listApprovalSteps('test-id', NORA);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ rationale: 'Over budget', status: 'rejected' });
+    });
+
     it('findApprovals is scoped per role (assigned for approvers)', async () => {
       jest.spyOn(prisma.approvalStep, 'findMany').mockResolvedValue([
         pendingStep({ approverId: 'lina.finance-approver' }),

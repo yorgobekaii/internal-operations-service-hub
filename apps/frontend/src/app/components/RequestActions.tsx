@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   approveServiceRequest,
+  declineServiceRequest,
   rejectServiceRequest,
   updateServiceRequestStatus,
 } from '../actions';
@@ -33,9 +34,12 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<'reject' | 'block' | null>(null);
+  const [expanded, setExpanded] = useState<'reject' | 'block' | 'decline' | null>(
+    null,
+  );
   const [rationale, setRationale] = useState('');
   const [blockedReason, setBlockedReason] = useState('');
+  const [declineRationale, setDeclineRationale] = useState('');
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setActorId(readActorId()));
@@ -62,6 +66,7 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
     setExpanded(null);
     setRationale('');
     setBlockedReason('');
+    setDeclineRationale('');
     router.refresh();
   }
 
@@ -116,6 +121,26 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
       setBusyAction(null);
     }
   }
+
+  async function decline() {
+    setBusy(true);
+    setBusyAction('decline-confirm');
+    setError(null);
+    try {
+      const res = await declineServiceRequest(req.id, declineRationale);
+      if (res.error) fail(typeof res.error === 'string' ? res.error : 'Decline failed.');
+      else done('Declined with rationale.');
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  const canDecline =
+    isHandler &&
+    (req.status === 'Submitted' ||
+      req.status === 'In Progress' ||
+      req.status === 'Blocked');
 
   const labelFor = (key: string, fallback: string) =>
     busy && busyAction === key ? 'Working…' : fallback;
@@ -215,6 +240,17 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
             </button>
           </>
         )}
+        {canDecline && (
+          <button
+            type="button"
+            disabled={busy}
+            aria-expanded={expanded === 'decline'}
+            onClick={() => setExpanded((p) => (p === 'decline' ? null : 'decline'))}
+            className="rounded-lg border border-rose-400/40 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50"
+          >
+            Decline
+          </button>
+        )}
         {isApprover && req.status !== 'Pending Approval' && (
           <p className="py-2 text-xs text-slate-400">Approvals act only on Pending.</p>
         )}
@@ -307,6 +343,51 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
               onClick={() => {
                 setExpanded(null);
                 setBlockedReason('');
+              }}
+              className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-300 hover:bg-slate-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {expanded === 'decline' && canDecline && (
+        <form
+          aria-label={`Decline ${req.title}`}
+          className="mt-4 rounded-lg border border-slate-600 bg-slate-900 p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void decline();
+          }}
+        >
+          <label
+            htmlFor={`detail-decline-${req.id}`}
+            className="block text-xs font-semibold uppercase tracking-wide text-slate-300"
+          >
+            Decline rationale (required)
+          </label>
+          <textarea
+            id={`detail-decline-${req.id}`}
+            value={declineRationale}
+            onChange={(e) => setDeclineRationale(e.target.value)}
+            rows={2}
+            placeholder="Why is this being declined?"
+            className="mt-1.5 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
+          />
+          <div className="mt-3 flex gap-2">
+            <button
+              type="submit"
+              disabled={busy || declineRationale.trim().length === 0}
+              className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+            >
+              {busy && busyAction === 'decline-confirm' ? 'Working…' : 'Confirm decline'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(null);
+                setDeclineRationale('');
               }}
               className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-300 hover:bg-slate-700"
             >

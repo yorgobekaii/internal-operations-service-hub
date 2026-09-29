@@ -158,6 +158,8 @@ describe('AppController (e2e) [isolated test.db]', () => {
       () => request(app.getHttpServer()).patch(`/service-requests/${id}/status`).send({ status: 'In Progress' }).expect(403),
       () => request(app.getHttpServer()).post(`/service-requests/${id}/approve`).send({}).expect(403),
       () => request(app.getHttpServer()).post(`/service-requests/${id}/reject`).send({ rationale: 'no' }).expect(403),
+      () => request(app.getHttpServer()).post(`/service-requests/${id}/decline`).send({ rationale: 'no' }).expect(403),
+      () => request(app.getHttpServer()).get(`/service-requests/${id}/approvals`).expect(403),
       () => request(app.getHttpServer()).get('/approvals').expect(403),
       () => request(app.getHttpServer()).get('/queues').expect(403),
       () => request(app.getHttpServer()).get(`/queues/${queueId}/requests`).expect(403),
@@ -719,6 +721,82 @@ describe('AppController (e2e) [isolated test.db]', () => {
     const steps = await prisma.approvalStep.findMany({ where: { requestId: id } });
     expect(steps).toHaveLength(1);
     expect(steps[0]).toMatchObject({ status: 'rejected', rationale: 'Over budget for Q3' });
+  });
+
+  it('Step C2: handler decline requires rationale, declines with audit + visible steps', async () => {
+    const postRes = await createRequest('E2E Decline Flow', 'IT', MAYA);
+    const id = postRes.body.id;
+
+    // Missing rationale is refused; state unchanged.
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/decline`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({})
+      .expect(400);
+
+    // Requesters and approvers cannot decline (handler/admin only).
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/decline`)
+      .set(USER_ID_HEADER, MAYA)
+      .send({ rationale: 'nope' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/decline`)
+      .set(USER_ID_HEADER, LINA)
+      .send({ rationale: 'nope' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/decline`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ rationale: 'Duplicate of INC-42' })
+      .expect(201)
+      .expect((res) => {
+        if (res.body.status !== 'Declined') throw new Error('Expected Declined');
+      });
+
+    const audit = await request(app.getHttpServer())
+      .get(`/service-requests/${id}/audit`)
+      .set(USER_ID_HEADER, NORA)
+      .expect(200);
+    const last = audit.body[audit.body.length - 1];
+    expect(last).toMatchObject({
+      from: 'Submitted',
+      to: 'Declined',
+      action: 'status_changed',
+      actorId: OMAR,
+    });
+
+    // Rationale is visible via the approvals read for requester + handler.
+    for (const actor of [MAYA, OMAR]) {
+      const stepsRes = await request(app.getHttpServer())
+        .get(`/service-requests/${id}/approvals`)
+        .set(USER_ID_HEADER, actor)
+        .expect(200);
+      const withRationale = stepsRes.body.filter(
+        (s: { rationale: string | null }) => s.rationale === 'Duplicate of INC-42',
+      );
+      expect(withRationale.length).toBeGreaterThan(0);
+    }
+
+    // Terminal: declining again is 422; gate route is refused for decline.
+    await request(app.getHttpServer())
+      .post(`/service-requests/${id}/decline`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ rationale: 'again' })
+      .expect(422);
+
+    const gated = await createRequest('E2E Decline Gate Refused', 'IT', MAYA);
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${gated.body.id}/status`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ status: 'Pending Approval' })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`/service-requests/${gated.body.id}/decline`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ rationale: 'must use approver reject' })
+      .expect(400);
   });
 
   it('Step C: approve records approver + approved audit; double-decide is refused', async () => {

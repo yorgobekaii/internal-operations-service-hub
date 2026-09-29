@@ -2,9 +2,13 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import {
+  QUEUE_ROUTES,
   SERVICE_REQUEST_ROUTES,
+  approverForCategory,
+  type ApprovalStep,
   type AuditEntry,
   type Comment,
+  type Queue,
   type ServiceRequest,
 } from '@internal/shared';
 import { categoryBadge, priorityBadge, statusBadge } from '../../components/badges';
@@ -48,10 +52,14 @@ export default async function RequestDetailPage({
   const { id } = await params;
   const headers = await identity();
 
-  const [reqRes, auditRes, commentsRes] = await Promise.all([
+  const [reqRes, auditRes, commentsRes, approvalsRes, queuesRes] = await Promise.all([
     fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.byId(id)}`, { cache: 'no-store', headers }),
     fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.auditById(id)}`, { cache: 'no-store', headers }),
     fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.commentsById(id)}`, { cache: 'no-store', headers }),
+    fetch(`${API_BASE}${SERVICE_REQUEST_ROUTES.approvalsById(id)}`, { cache: 'no-store', headers }),
+    // Best-effort: handlers/admins resolve the real queue name; requesters
+    // get 403 here and fall back to the category queue label below.
+    fetch(`${API_BASE}${QUEUE_ROUTES.base}`, { cache: 'no-store', headers }),
   ]);
 
   if (reqRes.status === 404) notFound();
@@ -60,7 +68,15 @@ export default async function RequestDetailPage({
   const req = (await reqRes.json()) as ServiceRequest;
   const audit = auditRes.ok ? ((await auditRes.json()) as AuditEntry[]) : [];
   const comments = commentsRes.ok ? ((await commentsRes.json()) as Comment[]) : [];
+  const steps = approvalsRes.ok ? ((await approvalsRes.json()) as ApprovalStep[]) : [];
   const decisions = audit.filter((e) => e.action === 'approved' || e.action === 'rejected');
+  const pendingSteps = steps.filter((s) => s.status === 'pending');
+  const designated = approverForCategory(req.category);
+  // Slice 3 — real ownership: queue name resolves for privileged actors,
+  // owner/backup/requester ids render verbatim (no generic placeholders).
+  const queues = queuesRes.ok ? ((await queuesRes.json()) as Queue[]) : [];
+  const queueName =
+    queues.find((q) => q.id === req.queueId)?.name ?? `${req.category} queue`;
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
@@ -92,9 +108,9 @@ export default async function RequestDetailPage({
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Meta label="Owner" value={req.ownerId ? `${req.category} handler` : 'Unassigned'} />
-        <Meta label="Backup" value={req.backupOwnerId ? `${req.category} backup` : 'Unassigned'} />
-        <Meta label="Queue" value={`${req.category} queue`} />
+        <Meta label="Owner" value={req.ownerId ?? 'Unassigned'} />
+        <Meta label="Backup" value={req.backupOwnerId ?? '—'} />
+        <Meta label="Queue" value={queueName} />
         <Meta label="Requester" value={req.requesterId ?? '—'} />
         <Meta label="SLA due" value={fmt(req.slaDueAt)} />
         <Meta label="Created" value={fmt(req.createdAt)} />
@@ -102,18 +118,58 @@ export default async function RequestDetailPage({
         <Meta label="Comments" value={String(comments.length)} />
       </section>
 
-      {decisions.length > 0 && (
-        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
-          <h2 className="text-sm font-bold text-white">Approval history</h2>
+      {pendingSteps.length > 0 && req.status === 'Pending Approval' && (
+        <section className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-5">
+          <h2 className="text-sm font-bold text-white">Awaiting decision</h2>
           <ul className="mt-3 space-y-2">
-            {decisions.map((d) => (
-              <li key={d.id} className="text-xs text-slate-300">
-                <span className={`font-bold ${d.action === 'approved' ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {d.action === 'approved' ? 'Approved' : 'Rejected'}
-                </span>{' '}
-                by {d.actorId} · {fmt(d.createdAt)}
+            {pendingSteps.map((s) => (
+              <li key={s.id} className="text-xs text-slate-300">
+                Pending with <span className="font-semibold text-violet-200">{s.approverId ?? designated}</span>
+                {' '}· designated approver <span className="text-slate-400">{designated}</span>
               </li>
             ))}
+          </ul>
+        </section>
+      )}
+
+      {(decisions.length > 0 || steps.length > 0) && (
+        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
+          <h2 className="text-sm font-bold text-white">Approval history</h2>
+          <ul className="mt-3 space-y-3">
+            {decisions.map((d) => {
+              const match = [...steps]
+                .reverse()
+                .find(
+                  (s) =>
+                    s.approverId === d.actorId &&
+                    (s.status === 'approved' || s.status === 'rejected'),
+                );
+              return (
+                <li key={d.id} className="text-xs text-slate-300">
+                  <span className={`font-bold ${d.action === 'approved' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                    {d.action === 'approved' ? 'Approved' : 'Rejected'}
+                  </span>{' '}
+                  by {d.actorId} · {fmt(d.createdAt)}
+                  {match?.rationale && (
+                    <span className="mt-1 block rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-slate-200">
+                      “{match.rationale}”
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+            {decisions.length === 0 &&
+              steps
+                .filter((s) => s.status === 'rejected' && s.rationale)
+                .map((s) => (
+                  <li key={s.id} className="text-xs text-slate-300">
+                    <span className="font-bold text-rose-300">Declined</span> by{' '}
+                    {s.approverId ?? 'handler'} · {fmt(s.decidedAt)}
+                    <span className="mt-1 block rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-slate-200">
+                      “{s.rationale}”
+                    </span>
+                  </li>
+                ))}
           </ul>
         </section>
       )}

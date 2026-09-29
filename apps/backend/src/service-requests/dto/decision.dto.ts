@@ -23,3 +23,9 @@ export class RejectServiceRequestDto implements RejectContract {
   @IsString()
   approverId?: string;
 }
+
+export class DeclineServiceRequestDto {
+  @IsString()
+  @IsNotEmpty()
+  rationale!: string;
+}

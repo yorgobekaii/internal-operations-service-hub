@@ -59,7 +59,7 @@ export default async function QueueRequestsPage({ params, searchParams }: PagePr
       {!result ? <div className="rounded-xl border border-slate-600 bg-slate-800 p-6 text-sm text-slate-300">This queue could not be loaded — select a handler for this department or an admin actor.</div> : rows.length === 0 ? <div className="rounded-xl border border-dashed border-slate-600 p-10 text-center text-sm text-slate-500">No requests match this view.</div> : (
         <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800">
           {rows.map((request) => <Link key={request.id} href={`/requests/${request.id}`} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 p-4 transition hover:bg-slate-700/50 last:border-0">
-            <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{request.title}</p><p className="mt-1 text-[11px] text-slate-500">{request.category} queue · by {request.requesterId ?? '—'}</p></div>
+            <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{request.title}</p><p className="mt-1 text-[11px] text-slate-500">{request.category} queue · by {request.requesterId ?? '—'} · owner {request.ownerId ?? 'unassigned'}</p></div>
             <div className="flex flex-wrap gap-1.5"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusBadge(request.status)}`}>{request.status}</span><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${categoryBadge(request.category)}`}>{request.category}</span><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${priorityBadge(request.priority)}`}>{request.priority}</span></div>
           </Link>)}
         </div>

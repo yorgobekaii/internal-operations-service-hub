@@ -214,4 +214,30 @@ export async function rejectServiceRequest(id: string, rationale: string) {
   }
 }
 
+export async function declineServiceRequest(id: string, rationale: string) {
+  if (!rationale || rationale.trim().length === 0) {
+    return { error: 'A decline rationale is required.' };
+  }
+  try {
+    const headers = await identityHeaders();
+    const res = await fetch(`${API_URL}/${id}/decline`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ rationale: rationale.trim() }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      return { error: errorData.message || 'Failed to decline request' };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/approvals');
+    revalidatePath(`/requests/${id}`);
+    return { success: true };
+  } catch {
+    return { error: 'Failed to connect to backend' };
+  }
+}
+
 export type { ServiceRequestPriority };

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   approveServiceRequest,
+  declineServiceRequest,
   rejectServiceRequest,
   updateServiceRequestStatus,
 } from '../actions';
@@ -71,7 +72,7 @@ function readActorId(): string {
   return match ? decodeURIComponent(match.split('=').slice(1).join('=')) : '';
 }
 
-type Expanded = { id: string; kind: 'reject' | 'block' } | null;
+type Expanded = { id: string; kind: 'reject' | 'block' | 'decline' } | null;
 
 export default function DashboardClient({
   initial,
@@ -92,6 +93,7 @@ export default function DashboardClient({
   const [expanded, setExpanded] = useState<Expanded>(null);
   const [rationale, setRationale] = useState('');
   const [blockedReason, setBlockedReason] = useState('');
+  const [declineRationale, setDeclineRationale] = useState('');
   const [actorId, setActorId] = useState('');
 
   useEffect(() => {
@@ -215,6 +217,29 @@ export default function DashboardClient({
       } else {
         setExpanded(null);
         setRationale('');
+        flashSuccess(id, 'Declined with rationale.');
+      }
+    } finally {
+      setBusyId(null);
+      setBusyAction(null);
+    }
+  }
+
+  async function decline(id: string, rationaleValue: string) {
+    setBusyId(id);
+    setBusyAction('decline-confirm');
+    setRowErrors((prev) => {
+      const nextErrors = { ...prev };
+      delete nextErrors[id];
+      return nextErrors;
+    });
+    try {
+      const res = await declineServiceRequest(id, rationaleValue);
+      if (res.error) {
+        flashError(id, typeof res.error === 'string' ? res.error : 'Decline failed.');
+      } else {
+        setExpanded(null);
+        setDeclineRationale('');
         flashSuccess(id, 'Declined with rationale.');
       }
     } finally {
@@ -373,7 +398,7 @@ export default function DashboardClient({
                         </Link>
                         <p className="mt-0.5 truncate text-xs text-slate-500">
                           {req.category} queue
-                          {req.ownerId ? ' · handler assigned' : ' · unassigned'}
+                          {req.ownerId ? ` · owner ${req.ownerId}` : ' · unassigned'}
                           {` · ${req.id.slice(0, 8)}`}
                         </p>
                       </td>
@@ -504,6 +529,74 @@ export default function DashboardClient({
                                 </button>
                               </div>
                             </form>
+                          ) : expanded.kind === 'decline' &&
+                            (req.status === 'Submitted' ||
+                              req.status === 'In Progress' ||
+                              req.status === 'Blocked') ? (
+                            <form
+                              className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                              aria-label={`Decline ${req.title}`}
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                void decline(req.id, declineRationale);
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <h3 className="text-sm font-bold text-slate-900">
+                                  Decline — rationale required
+                                </h3>
+                                <span className="pill-base border-slate-200 bg-slate-100 text-slate-600">
+                                  {req.id.slice(0, 8)}
+                                </span>
+                              </div>
+                              <label
+                                htmlFor={`decline-${req.id}`}
+                                className="mt-2 block text-xs font-semibold tracking-wide text-slate-700 uppercase"
+                              >
+                                Rationale
+                              </label>
+                              <textarea
+                                id={`decline-${req.id}`}
+                                value={declineRationale}
+                                onChange={(e) =>
+                                  setDeclineRationale(e.target.value)
+                                }
+                                rows={2}
+                                placeholder="Why is this being declined?"
+                                className="field-input mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                              />
+                              {rowErrors[req.id] && (
+                                <p
+                                  role="alert"
+                                  className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700"
+                                >
+                                  {rowErrors[req.id]}
+                                </p>
+                              )}
+                              <div className="mt-3 flex gap-2">
+                                <button
+                                  type="submit"
+                                  disabled={
+                                    busy || declineRationale.trim().length === 0
+                                  }
+                                  className="btn-table btn-table-solid focus-ring"
+                                >
+                                  {busy && busyAction === 'decline-confirm'
+                                    ? 'Working…'
+                                    : 'Confirm decline'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExpanded(null);
+                                    setDeclineRationale('');
+                                  }}
+                                  className="btn-table btn-table-quiet focus-ring"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
                           ) : expanded.kind === 'block' &&
                             req.status === 'In Progress' ? (
                             <form
@@ -615,7 +708,7 @@ function RequestActions({
     reason?: string,
   ) => Promise<void>;
   onApprove: () => Promise<void>;
-  onToggleExpand: (kind: 'reject' | 'block') => void;
+  onToggleExpand: (kind: 'reject' | 'block' | 'decline') => void;
 }) {
   const action = nextStatusFor(req.status);
   const isRequester = role === 'requester';
@@ -701,6 +794,20 @@ function RequestActions({
             {labelFor('resume', action.label)}
           </button>
         )}
+        {isHandler &&
+          (req.status === 'Submitted' ||
+            req.status === 'In Progress' ||
+            req.status === 'Blocked') && (
+            <button
+              type="button"
+              disabled={busy}
+              aria-expanded={expanded?.id === req.id && expanded.kind === 'decline'}
+              onClick={() => onToggleExpand('decline')}
+              className="btn-table btn-table-quiet focus-ring"
+            >
+              Decline
+            </button>
+          )}
         {isApprover && req.status === 'Pending Approval' && (
           <>
             <button

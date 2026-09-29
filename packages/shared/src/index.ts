@@ -40,6 +40,10 @@ export interface RejectServiceRequestDto {
   approverId?: string;
 }
 
+export interface DeclineServiceRequestDto {
+  rationale: string;
+}
+
 export interface ServiceRequest {
   id: string;
   title: string;
@@ -295,6 +299,8 @@ export const SERVICE_REQUEST_ROUTES = {
   auditById: (id: string) => `/service-requests/${id}/audit`,
   approveById: (id: string) => `/service-requests/${id}/approve`,
   rejectById: (id: string) => `/service-requests/${id}/reject`,
+  declineById: (id: string) => `/service-requests/${id}/decline`,
+  approvalsById: (id: string) => `/service-requests/${id}/approvals`,
   commentsById: (id: string) => `/service-requests/${id}/comments`,
   aiTriage: '/service-requests/ai-triage',
 } as const;
