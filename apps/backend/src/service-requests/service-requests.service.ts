@@ -36,6 +36,7 @@ import {
   isApproverRole,
   isHandlerRole,
   isRequesterRole,
+  requiresAutoApproval,
   resolveTeachingActor,
 } from '@internal/shared';
 import { missingPayloadFields } from '@internal/shared';
@@ -182,12 +183,18 @@ export class ServiceRequestsService {
     // Server-owned fields: ignore client requesterId/queueId/ownerId entirely.
     const requesterId = resolved.userId;
     const actorId = resolved.userId;
+    // Slice 4 — hybrid auto-gating: high-cost Finance intake opens gated;
+    // everything else keeps the Submitted default. Manual
+    // Submitted → Pending Approval remains available as a fallback.
+    const autoGate = requiresAutoApproval(createDto.category, payload);
+    const initialStatus = autoGate ? 'Pending Approval' : 'Submitted';
+    const designated = autoGate ? approverForCategory(createDto.category) : null;
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.serviceRequest.create({
         data: {
           title: createDto.title,
           category: createDto.category,
-          status: 'Submitted',
+          status: initialStatus,
           priority,
           description: createDto.description ?? null,
           requesterId,
@@ -198,18 +205,23 @@ export class ServiceRequestsService {
           slaDueAt: computeSlaDueAt(priority),
         },
       });
+      if (autoGate && designated) {
+        await tx.approvalStep.create({
+          data: { requestId: created.id, approverId: designated, status: 'pending' },
+        });
+      }
       await tx.auditEntry.create({
         data: {
           requestId: created.id,
           actorId,
           from: null,
-          to: 'Submitted',
+          to: initialStatus,
           action: 'created',
         },
       });
       return created;
     });
-    this.notifications.notify('request.created', {
+    this.notifications.notify(autoGate ? 'request.gated' : 'request.created', {
       requestId: row.id,
       category: createDto.category,
       priority,

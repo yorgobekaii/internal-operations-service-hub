@@ -151,6 +151,13 @@ export default function NewRequestForm() {
         ),
       )}
 
+      {category === 'Finance' && (
+        <p className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-700 sm:col-span-2">
+          Finance requests of $1000 or more route via approval automatically on
+          submit — handlers can also request approval manually below that.
+        </p>
+      )}
+
       {error && (
         <p
           role="alert"

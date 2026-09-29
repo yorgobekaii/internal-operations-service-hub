@@ -397,6 +397,34 @@ export const CATEGORY_SCHEMAS: Record<ServiceRequestCategory, CategoryField[]> =
   ],
 };
 
+/**
+ * Slice 4 — deterministic auto-gating threshold (hybrid model).
+ * Finance requests at or above this amount enter `Pending Approval` on
+ * creation with a step for the designated approver. The manual
+ * `Submitted → Pending Approval` handler transition remains available
+ * as a fallback for judgment calls below the threshold.
+ */
+export const AUTO_APPROVAL_THRESHOLD_AMOUNT = 1000;
+
+/** Parse a free-text Finance amount (`4500 USD`, `$4,500`) to a number. */
+export function parseAmount(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return 0;
+  const cleaned = value.replace(/[^0-9.]/g, '');
+  if (!cleaned) return 0;
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** True when creation must open directly in `Pending Approval`. */
+export function requiresAutoApproval(
+  category: string,
+  payload: Record<string, unknown>,
+): boolean {
+  if (category !== 'Finance') return false;
+  return parseAmount(payload['amount']) >= AUTO_APPROVAL_THRESHOLD_AMOUNT;
+}
+
 /** Required payloadJson keys for a category (description-mapped fields excluded). */
 export function requiredPayloadFields(category: ServiceRequestCategory): string[] {
   return (CATEGORY_SCHEMAS[category] ?? [])

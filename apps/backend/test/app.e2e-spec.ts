@@ -374,6 +374,70 @@ describe('AppController (e2e) [isolated test.db]', () => {
       });
   });
 
+  it('Slice 4: Finance >= $1000 auto-gates on creation; manual gate still works', async () => {
+    // High-cost Finance opens gated with a designated step for Lina.
+    const gated = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set(USER_ID_HEADER, MAYA)
+      .send({
+        title: 'E2E Auto Gate',
+        category: 'Finance',
+        payloadJson: JSON.stringify({ amount: '4500 USD', costCenter: 'CC-9' }),
+      })
+      .expect(201)
+      .expect((res) => {
+        if (res.body.status !== 'Pending Approval')
+          throw new Error('Expected Pending Approval from auto-gate');
+      });
+    createdIds.push(gated.body.id);
+
+    const gatedSteps = await prisma.approvalStep.findMany({
+      where: { requestId: gated.body.id },
+    });
+    expect(gatedSteps).toHaveLength(1);
+    expect(gatedSteps[0]).toMatchObject({
+      status: 'pending',
+      approverId: LINA,
+    });
+
+    // Designated approver can release the auto-gated ticket.
+    await request(app.getHttpServer())
+      .post(`/service-requests/${gated.body.id}/approve`)
+      .set(USER_ID_HEADER, LINA)
+      .send({})
+      .expect(201)
+      .expect((res) => {
+        if (res.body.status !== 'In Progress')
+          throw new Error('Expected In Progress after approval');
+      });
+
+    // Below threshold stays Submitted.
+    const small = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set(USER_ID_HEADER, MAYA)
+      .send({
+        title: 'E2E No Auto Gate',
+        category: 'Finance',
+        payloadJson: JSON.stringify({ amount: '50', costCenter: 'CC-9' }),
+      })
+      .expect(201)
+      .expect((res) => {
+        if (res.body.status !== 'Submitted') throw new Error('Expected Submitted');
+      });
+    createdIds.push(small.body.id);
+
+    // Manual fallback intact: handler can still request approval below threshold.
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${small.body.id}/status`)
+      .set(USER_ID_HEADER, NORA)
+      .send({ status: 'Pending Approval' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.status !== 'Pending Approval')
+          throw new Error('Expected manual gate to Pending Approval');
+      });
+  });
+
   it('Forbidden mutations leave state and audit unchanged', async () => {
     const postRes = await createRequest('E2E Forbidden Stable', 'IT', MAYA);
     const id = postRes.body.id;

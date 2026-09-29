@@ -737,6 +737,65 @@ describe('ServiceRequestsService', () => {
     });
   });
 
+  describe('Slice 4: Hybrid auto-gating on creation', () => {
+    it('Finance >= $1000 opens Pending Approval with a designated step', async () => {
+      mockTx.serviceRequest.create.mockImplementation(async (args: {
+        data: Record<string, unknown>;
+      }) => Promise.resolve({ ...buildRow(), ...(args.data as object), id: 'new-id' }));
+
+      const result = await service.create(
+        {
+          title: 'Laptops',
+          category: 'Finance',
+          payloadJson: JSON.stringify({ amount: '4500 USD', costCenter: 'CC-1' }),
+        },
+        MAYA,
+      );
+
+      expect(result.status).toBe('Pending Approval');
+      expect(mockTx.serviceRequest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ status: 'Pending Approval' }),
+      });
+      expect(mockTx.approvalStep.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          approverId: 'lina.finance-approver',
+          status: 'pending',
+        }),
+      });
+      expect(mockTx.auditEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ from: null, to: 'Pending Approval' }),
+      });
+    });
+
+    it('Finance below threshold and non-Finance stay Submitted without steps', async () => {
+      mockTx.serviceRequest.create.mockImplementation(async (args: {
+        data: Record<string, unknown>;
+      }) => Promise.resolve({ ...buildRow(), ...(args.data as object), id: 'new-id' }));
+      const stepsBefore = mockTx.approvalStep.create.mock.calls.length;
+
+      const small = await service.create(
+        {
+          title: 'Cables',
+          category: 'Finance',
+          payloadJson: JSON.stringify({ amount: '50', costCenter: 'CC-1' }),
+        },
+        MAYA,
+      );
+      expect(small.status).toBe('Submitted');
+
+      const it = await service.create(
+        {
+          title: 'VPN',
+          category: 'IT',
+          payloadJson: JSON.stringify({ system: 'VPN' }),
+        },
+        MAYA,
+      );
+      expect(it.status).toBe('Submitted');
+      expect(mockTx.approvalStep.create.mock.calls.length).toBe(stepsBefore);
+    });
+  });
+
   describe('Step E: Category intake validation', () => {
     it('refuses intake missing required category fields', async () => {
       await expect(
