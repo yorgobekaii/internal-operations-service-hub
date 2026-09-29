@@ -66,7 +66,8 @@ export function toCommentContract(row: PrismaComment): SharedComment {
 export function computeSlaDueAt(
   priority: ServiceRequestPriority,
   from: Date = new Date(),
+  configuredHours?: Record<ServiceRequestPriority, number>,
 ): Date {
-  const hours = SLA_HOURS[priority] ?? SLA_HOURS.Standard;
+  const hours = configuredHours?.[priority] ?? SLA_HOURS[priority] ?? SLA_HOURS.Standard;
   return new Date(from.getTime() + hours * 60 * 60 * 1000);
 }

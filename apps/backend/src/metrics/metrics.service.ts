@@ -40,6 +40,13 @@ export class MetricsService {
   constructor(private readonly prisma: PrismaService) {}
 
   private requirePrivileged(actor?: ActorInput): ResolvedActor {
+    if (actor && 'role' in actor && 'displayName' in actor && actor.userId) {
+      const resolved = actor as ResolvedActor;
+      if (isRequesterRole(resolved.role)) {
+        throw new ForbiddenException('Forbidden: handler, approver or admin required');
+      }
+      return resolved;
+    }
     const userId = (actor as { userId?: string } | undefined)?.userId;
     const resolved = resolveTeachingActor(
       typeof userId === 'string' ? userId : undefined,

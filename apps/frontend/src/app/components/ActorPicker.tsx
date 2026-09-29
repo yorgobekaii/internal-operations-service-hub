@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { TEACHING_ACTORS, USER_ID_HEADER } from '@internal/shared';
+import { USER_ID_HEADER } from '@internal/shared';
+import { useRuntimeActors } from './actor-registry';
 
 const COOKIE = USER_ID_HEADER;
 
@@ -32,6 +33,7 @@ export function useActorPicker(mode: PickerMode) {
   const [actorId, setActorId] = useState('');
   const [ready, setReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+  const actors = useRuntimeActors();
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -66,11 +68,12 @@ export function useActorPicker(mode: PickerMode) {
     router.refresh();
   }
 
-  const current = TEACHING_ACTORS.find((actor) => actor.id === actorId);
+  const current = actors.find((actor) => actor.id === actorId);
 
   return {
     actorId,
     current,
+    actors,
     isSwitching,
     ready,
     selectActor,
@@ -79,7 +82,7 @@ export function useActorPicker(mode: PickerMode) {
 }
 
 export default function ActorPicker({ mode }: { mode: PickerMode }) {
-  const { actorId, current, isSwitching, ready, selectActor, logOff } = useActorPicker(mode);
+  const { actorId, current, actors, isSwitching, ready, selectActor, logOff } = useActorPicker(mode);
   const isLanding = mode === 'landing';
 
   if (!ready) return null;
@@ -109,7 +112,7 @@ export default function ActorPicker({ mode }: { mode: PickerMode }) {
         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 disabled:cursor-wait disabled:opacity-60"
       >
         <option value="">Select actor…</option>
-        {TEACHING_ACTORS.map((actor) => (
+        {actors.map((actor) => (
           <option key={actor.id} value={actor.id}>
             {actor.name} · {actor.blurb}{actor.department ? ` (${actor.department})` : ''}
           </option>

@@ -69,11 +69,40 @@ export interface ServiceRequest {
 
 export interface User {
   id: string;
+  name?: string;
   email: string;
   role: string;
   department?: string | null;
+  active?: boolean;
   createdAt: string | Date;
   updatedAt: string | Date;
+}
+
+export interface AdminDepartment {
+  id: string;
+  name: string;
+  active: boolean;
+  categories: string[];
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
+export interface AdminSettings {
+  autoApprovalThresholdAmount: number;
+  slaHours: Record<ServiceRequestPriority, number>;
+  updatedBy?: string | null;
+  updatedAt: string | Date;
+}
+
+export interface AdminAuditEntry {
+  id: string;
+  actorId: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  beforeJson?: string | null;
+  afterJson?: string | null;
+  createdAt: string | Date;
 }
 
 export interface Queue {
@@ -345,6 +374,19 @@ export const QUEUE_ROUTES = {
   base: '/queues',
   byId: (id: string) => `/queues/${id}`,
   requestsByQueue: (id: string) => `/queues/${id}/requests`,
+} as const;
+
+export const ADMIN_ROUTES = {
+  users: '/admin/users',
+  userById: (id: string) => `/admin/users/${id}`,
+  deactivateUser: (id: string) => `/admin/users/${id}/deactivate`,
+  departments: '/admin/departments',
+  departmentById: (id: string) => `/admin/departments/${id}`,
+  archiveDepartment: (id: string) => `/admin/departments/${id}/archive`,
+  categoryMapping: (category: string) => `/admin/category-mappings/${category}`,
+  settings: '/admin/settings',
+  audit: '/admin/audit',
+  actors: '/actors',
 } as const;
 
 export const USER_DEPT_HEADER = 'x-user-dept';

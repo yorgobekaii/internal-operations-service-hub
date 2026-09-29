@@ -31,11 +31,17 @@ model ServiceRequest {
 
 model User {
   id         String   @id @default(uuid())
+  name       String   @default("")
   email      String   @unique
   role       String   @default("requester")
   department String?
+  active     Boolean  @default(true)
+  departmentId String?
+  departmentRef Department? @relation(fields: [departmentId], references: [id])
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([departmentId, role, active])
 }
 
 model Queue {
@@ -46,6 +52,54 @@ model Queue {
   backupOwnerId String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+  mappings  DepartmentCategoryMapping[]
+}
+
+model DepartmentCategoryMapping {
+  id           String     @id @default(uuid())
+  category     String     @unique
+  departmentId String
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  @@index([departmentId, active])
+}
+
+model SystemSettings {
+  id                          String   @id @default("default")
+  autoApprovalThresholdCents Int      @default(100000)
+  urgentSlaHours             Int      @default(2)
+  highSlaHours               Int      @default(24)
+  standardSlaHours           Int      @default(72)
+  lowSlaHours                Int      @default(120)
+  updatedBy                  String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model AdminAuditEntry {
+  id         String   @id @default(uuid())
+  actorId    String
+  entityType String
+  entityId   String
+  action     String
+  beforeJson String?
+  afterJson  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model ApprovalStep {

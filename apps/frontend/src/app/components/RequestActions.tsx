@@ -10,7 +10,7 @@ import {
   updateServiceRequestStatus,
 } from '../actions';
 import { nextStatusFor } from './badges';
-import { TEACHING_ACTORS, getTeachingActor } from '@internal/shared';
+import { useRuntimeActors } from './actor-registry';
 import type { ServiceRequest, ServiceRequestStatus } from '@internal/shared';
 
 function readActorId(): string {
@@ -54,7 +54,8 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
     return () => clearTimeout(t);
   }, [success]);
 
-  const teaching = getTeachingActor(actorId);
+  const actors = useRuntimeActors();
+  const teaching = actors.find((actor) => actor.id === actorId);
   const role = teaching?.role ?? '';
   const isHandler = role === 'handler' || (role as string) === 'operator';
   const isApprover = role === 'approver';
@@ -162,7 +163,7 @@ export default function RequestActions({ req }: { req: ServiceRequest }) {
     (isHandler || isAdmin) &&
     req.status !== 'Resolved' &&
     req.status !== 'Declined';
-  const ownerOptions = TEACHING_ACTORS.filter(
+  const ownerOptions = actors.filter(
     (a) => (a.role === 'handler' || (a.role as string) === 'operator') && a.department === req.category,
   );
 

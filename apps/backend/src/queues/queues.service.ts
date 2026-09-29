@@ -47,6 +47,9 @@ export class QueuesService {
   constructor(private readonly prisma: PrismaService) {}
 
   private requireResolved(actor?: ActorInput): ResolvedActor {
+    if (actor && 'role' in actor && 'displayName' in actor && actor.userId) {
+      return actor as ResolvedActor;
+    }
     const userId = (actor as { userId?: string } | undefined)?.userId;
     const resolved = resolveTeachingActor(
       typeof userId === 'string' ? userId : undefined,
@@ -74,6 +77,13 @@ export class QueuesService {
    * by unique keys, so concurrent calls cannot duplicate rows).
    */
   async routeForCategory(category: string) {
+    const mapping = await this.prisma.departmentCategoryMapping.findUnique({
+      where: { category },
+      include: { department: true },
+    });
+    if (mapping && (!mapping.active || !mapping.department.active)) {
+      throw new BadRequestException(`Category ${category} is not currently routable.`);
+    }
     let queue = await this.prisma.queue.findUnique({ where: { category } });
     if (!queue) {
       const owner = await this.ensureSeedUser(seedEmail(category, 'owner'), category);

@@ -84,6 +84,9 @@ export class ServiceRequestsService {
    * Missing or unknown `x-user-id` => Forbidden (never anonymous/global).
    */
   private requireResolved(actor?: ActorInput): ResolvedActor {
+    if (actor && 'role' in actor && 'displayName' in actor && actor.userId) {
+      return actor as ResolvedActor;
+    }
     const userId = (actor as { userId?: string } | undefined)?.userId;
     const resolved = resolveTeachingActor(
       typeof userId === 'string' ? userId : undefined,
@@ -188,7 +191,11 @@ export class ServiceRequestsService {
     // Slice 4 — hybrid auto-gating: high-cost Finance intake opens gated;
     // everything else keeps the Submitted default. Manual
     // Submitted → Pending Approval remains available as a fallback.
-    const autoGate = requiresAutoApproval(createDto.category, payload);
+    const settings = (this.prisma as any).systemSettings
+      ? await this.prisma.systemSettings.upsert({ where: { id: 'default' }, update: {}, create: {} })
+      : { autoApprovalThresholdCents: 100000, urgentSlaHours: 2, highSlaHours: 24, standardSlaHours: 72, lowSlaHours: 120 };
+    const autoGate = createDto.category === 'Finance' &&
+      Number((payload.amount ?? 0).toString().replace(/[^0-9.]/g, '')) * 100 >= settings.autoApprovalThresholdCents;
     const initialStatus = autoGate ? 'Pending Approval' : 'Submitted';
     const designated = autoGate ? approverForCategory(createDto.category) : null;
     const row = await this.prisma.$transaction(async (tx) => {
@@ -204,7 +211,12 @@ export class ServiceRequestsService {
           ownerId: route.ownerId,
           backupOwnerId: route.backupOwnerId,
           payloadJson: createDto.payloadJson ?? null,
-          slaDueAt: computeSlaDueAt(priority),
+          slaDueAt: computeSlaDueAt(priority, new Date(), {
+            Urgent: settings.urgentSlaHours,
+            High: settings.highSlaHours,
+            Standard: settings.standardSlaHours,
+            Low: settings.lowSlaHours,
+          }),
         },
       });
       if (autoGate && designated) {

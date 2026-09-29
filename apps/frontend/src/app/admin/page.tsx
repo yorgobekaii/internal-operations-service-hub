@@ -1,4 +1,8 @@
 import AdminDashboard from '../components/AdminDashboard';
+import AdminUsers from '../components/AdminUsers';
+import AdminDepartments from '../components/AdminDepartments';
+import AdminSettings from '../components/AdminSettings';
+import AdminAudit from '../components/AdminAudit';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,16 +14,19 @@ export default function AdminPage() {
           Operations
         </p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight text-white">
-          Queue health
+          Admin command center
         </h1>
         <p className="mt-1 max-w-xl text-sm text-slate-400">
-          Aggregate volume, backlog, SLA breaches and cycle times. Admin sees
-          full aggregates; handlers and approvers see only their scoped queues.
-          Sensitive HR/Legal payloads stay redacted for admins.
+          Manage teaching identities, departments, routing, tunables, and the
+          operational audit trail. Backend authorization remains authoritative.
         </p>
       </div>
 
       <AdminDashboard />
+      <AdminUsers />
+      <AdminDepartments />
+      <AdminSettings />
+      <AdminAudit />
     </main>
   );
 }

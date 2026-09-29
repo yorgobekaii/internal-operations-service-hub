@@ -8,6 +8,7 @@ import {
   type RequestActor,
   type ResolvedActor,
 } from '@internal/shared';
+import { TeachingIdentityService } from '../teaching-identity/teaching-identity.service';
 
 function rawUserId(req: unknown): string | undefined {
   const headers = (req as { headers?: Record<string, unknown> }).headers;
@@ -25,6 +26,8 @@ function rawUserId(req: unknown): string | undefined {
  * Unknown or absent ids yield undefined — callers must 403.
  */
 export function resolvedActorFromRequest(req: unknown): ResolvedActor | undefined {
+  const attached = (req as { user?: ResolvedActor }).user;
+  if (attached) return attached;
   return resolveTeachingActor(rawUserId(req));
 }
 
@@ -50,24 +53,24 @@ function deny(message: string): never {
 /** Any known teaching actor; 403 for missing/unknown `x-user-id`. */
 @Injectable()
 export class RequireActorGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly identities: TeachingIdentityService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    const actor = resolvedActorFromRequest(req);
+    const actor = await this.identities.resolve(rawUserId(req));
     attach(req, actor);
     if (!actor) deny('Forbidden: unknown or missing actor');
     return true;
   }
 }
 
-/**
- * Workflow transitions: handler (`handler`/`operator` legacy) or admin only.
- * Requesters and approvers cannot PATCH status (approvers use approve/reject).
- */
 @Injectable()
 export class RequireHandlerGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly identities: TeachingIdentityService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    const actor = resolvedActorFromRequest(req);
+    const actor = await this.identities.resolve(rawUserId(req));
     attach(req, actor);
     if (!actor) deny('Forbidden: unknown or missing actor');
     if (!(isHandlerRole(actor?.role) || isAdminRole(actor?.role))) {
@@ -77,12 +80,13 @@ export class RequireHandlerGuard implements CanActivate {
   }
 }
 
-/** Approval decisions: designated approver role only (assignment checked in service). */
 @Injectable()
 export class RequireApproverGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly identities: TeachingIdentityService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    const actor = resolvedActorFromRequest(req);
+    const actor = await this.identities.resolve(rawUserId(req));
     attach(req, actor);
     if (!actor) deny('Forbidden: unknown or missing actor');
     if (!isApproverRole(actor?.role)) deny('Forbidden: approver role required');
@@ -90,12 +94,13 @@ export class RequireApproverGuard implements CanActivate {
   }
 }
 
-/** Admin-only (configuration/metrics). Currently used by metrics scoping helpers. */
 @Injectable()
 export class RequireAdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly identities: TeachingIdentityService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
-    const actor = resolvedActorFromRequest(req);
+    const actor = await this.identities.resolve(rawUserId(req));
     attach(req, actor);
     if (!actor) deny('Forbidden: unknown or missing actor');
     if (!isAdminRole(actor?.role)) deny('Forbidden: admin role required');
@@ -104,12 +109,14 @@ export class RequireAdminGuard implements CanActivate {
 }
 
 /**
- * Legacy guard: preserved for backward compatibility, now fail-closed on the
- * teaching registry. Allows handler/operator + admin (workflow mutations).
+ * Legacy guard retained for callers that still import it. Nest injects the
+ * same identity service used by the current handler guard.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    return new RequireHandlerGuard().canActivate(context);
+  constructor(private readonly identities: TeachingIdentityService) {}
+
+  canActivate(context: ExecutionContext): Promise<boolean> {
+    return new RequireHandlerGuard(this.identities).canActivate(context);
   }
 }

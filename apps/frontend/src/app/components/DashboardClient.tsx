@@ -16,12 +16,12 @@ import {
   priorityBadge,
   statusBadge,
 } from './badges';
-import { TEACHING_ACTORS, getTeachingActor } from '@internal/shared';
 import type {
   ServiceRequest,
   ServiceRequestCategory,
   ServiceRequestStatus,
 } from '@internal/shared';
+import { useRuntimeActors } from './actor-registry';
 
 const CATEGORIES: Array<'All' | ServiceRequestCategory> = [
   'All',
@@ -110,7 +110,8 @@ export default function DashboardClient({
     return () => clearTimeout(t);
   }, [success]);
 
-  const teaching = getTeachingActor(actorId);
+  const actors = useRuntimeActors();
+  const teaching = actors.find((actor) => actor.id === actorId);
   const role = teaching?.role ?? '';
 
   const filtered = useMemo(() => {
@@ -586,7 +587,7 @@ export default function DashboardClient({
                                 className="field-select mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none"
                               >
                                 <option value="">Select…</option>
-                                {TEACHING_ACTORS.filter(
+                                {actors.filter(
                                   (a) =>
                                     (a.role === 'handler' || (a.role as string) === 'operator') &&
                                     a.department === req.category,
