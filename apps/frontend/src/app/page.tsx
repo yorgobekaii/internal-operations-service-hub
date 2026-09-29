@@ -43,6 +43,7 @@ export default async function Page() {
   const approvals = requests.filter((r) => r.status === 'Pending Approval').length;
   const blocked = requests.filter((r) => r.status === 'Blocked').length;
   const resolved = requests.filter((r) => r.status === 'Resolved').length;
+  const declined = requests.filter((r) => r.status === 'Declined').length;
   // Time snapshot is intentional: force-dynamic server render, evaluated once per request.
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
@@ -87,11 +88,12 @@ export default async function Page() {
         </div>
       </section>
 
-      <section className="reveal-up reveal-delay-1 grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Queue metrics">
+      <section className="reveal-up reveal-delay-1 grid grid-cols-2 gap-4 lg:grid-cols-5" aria-label="Queue metrics">
         <Stat label="Open pipeline" value={open} />
         <Stat label="Pending approval" value={approvals} />
         <Stat label="Blocked" value={blocked} />
         <Stat label="Resolved" value={resolved} />
+        <Stat label="Declined" value={declined} />
       </section>
 
       <div className="reveal-up reveal-delay-2"><AiAssistant /></div>

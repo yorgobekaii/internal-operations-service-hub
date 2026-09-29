@@ -91,6 +91,9 @@ export class MetricsService {
     const rows = (requests as MetricRow[]).filter(inScope);
     const open = rows.filter((r) => ACTIVE_STATUSES.includes(r.status));
     const resolvedRows = rows.filter((r) => r.status === 'Resolved');
+    // Slice 6 — Declined is terminal and never reopened (immutability rule);
+    // reported as a cumulative closed count, not a reopen rate.
+    const declined = rows.filter((r) => r.status === 'Declined').length;
 
     const breached = open.filter((r) => r.slaDueAt && r.slaDueAt < now);
     const resolvedLate = resolvedRows.filter(
@@ -131,6 +134,7 @@ export class MetricsService {
         ).length,
       },
       backlog: open.length,
+      declined,
       breachedOpen: breached.length,
       breachedOpenIds: breached.slice(0, 100).map((r) => r.id),
       resolvedLate: resolvedLate.length,

@@ -100,6 +100,7 @@ describe('MetricsService', () => {
     const report = await service.getQueueHealth(ADMIN, NOW);
 
     expect(report.backlog).toBe(0);
+    expect(report.declined).toBe(0);
     expect(report.breachedOpen).toBe(0);
     expect(report.breachedOpenIds).toEqual([]);
     expect(report.resolvedLate).toBe(0);
@@ -123,6 +124,7 @@ describe('MetricsService', () => {
     expect(report.volume.total).toBe(5);
     expect(report.volume.last24h).toBe(2);
     expect(report.backlog).toBe(2);
+    expect(report.declined).toBe(1);
     expect(report.breachedOpen).toBe(1);
     expect(report.breachedOpenIds).toEqual(['r1']);
     expect(report.resolvedLate).toBe(1);
@@ -147,8 +149,22 @@ describe('MetricsService', () => {
     const report = await service.getQueueHealth(IT_HANDLER, NOW);
     expect(report.volume.total).toBe(1);
     expect(report.backlog).toBe(1);
+    expect(report.declined).toBe(0);
     expect(report.perQueue).toHaveLength(1);
     expect(report.perQueue[0].category).toBe('IT');
+  });
+
+  it('counts declined in scope and keeps terminals out of the backlog', async () => {
+    jest.spyOn(prisma.serviceRequest, 'findMany').mockResolvedValue([
+      row({ id: 'r1', queueId: 'q-it', status: 'Declined', createdAt: h(30), updatedAt: h(29) }),
+      row({ id: 'r2', queueId: 'q-it', status: 'Resolved', createdAt: h(30), updatedAt: h(29) }),
+      row({ id: 'r3', queueId: 'q-it', status: 'Submitted', createdAt: h(2), updatedAt: h(2) }),
+    ]);
+
+    const report = await service.getQueueHealth(IT_HANDLER, NOW);
+    expect(report.volume.total).toBe(3);
+    expect(report.backlog).toBe(1);
+    expect(report.declined).toBe(1);
   });
 
   it('scopes approver metrics to designated categories', async () => {

@@ -1200,6 +1200,37 @@ describe('AppController (e2e) [isolated test.db]', () => {
     expect(triage.body.category).toBe('Legal');
   });
 
+  it('Slice 6: metrics report declined; terminals stay closed (no reopen)', async () => {
+    const doomed = await createRequest('E2E Metrics Declined', 'IT', MAYA);
+    await request(app.getHttpServer())
+      .post(`/service-requests/${doomed.body.id}/decline`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ rationale: 'Out of scope for ops' })
+      .expect(201);
+
+    // No reopen path: every transition out of Declined is refused.
+    await request(app.getHttpServer())
+      .patch(`/service-requests/${doomed.body.id}/status`)
+      .set(USER_ID_HEADER, OMAR)
+      .send({ status: 'In Progress' })
+      .expect(422);
+    await request(app.getHttpServer())
+      .post(`/service-requests/${doomed.body.id}/approve`)
+      .set(USER_ID_HEADER, LINA)
+      .send({})
+      .expect(400);
+
+    const metrics = await request(app.getHttpServer())
+      .get('/metrics/queue-health')
+      .set(USER_ID_HEADER, NORA)
+      .expect(200)
+      .expect((res) => {
+        if (typeof res.body.declined !== 'number' || res.body.declined < 1)
+          throw new Error('Expected declined >= 1');
+      });
+    expect(metrics.body.backlog).toBeGreaterThanOrEqual(0);
+  });
+
   it('Step F: GET /metrics/queue-health reflects volume, backlog, breaches and cycles (scoped)', async () => {
     const open = await createRequest('E2E Metrics Open', 'IT', MAYA);
     const cycled = await createRequest('E2E Metrics Cycle', 'IT', MAYA);

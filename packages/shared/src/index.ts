@@ -329,6 +329,8 @@ export interface QueueHealthReport {
   volume: { total: number; last24h: number };
   /** Open requests across Submitted / Pending Approval / In Progress / Blocked. */
   backlog: number;
+  /** Closed as Declined (terminal — never reopened, see immutability rule). */
+  declined: number;
   /** Open requests past their slaDueAt. */
   breachedOpen: number;
   breachedOpenIds: string[];

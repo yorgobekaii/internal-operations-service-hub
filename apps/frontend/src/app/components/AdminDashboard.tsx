@@ -83,6 +83,7 @@ export default function AdminDashboard() {
         <Stat label="Backlog (open)" value={String(report.backlog)} />
         <Stat label="SLA breached" value={String(report.breachedOpen)} />
         <Stat label="Resolved late" value={String(report.resolvedLate)} />
+        <Stat label="Declined" value={String(report.declined ?? 0)} />
         <Stat label="Volume total" value={String(report.volume.total)} />
         <Stat label="Created 24h" value={String(report.volume.last24h)} />
         <Stat label="Avg queue age" value={hours(report.avgQueueAgeHours)} />

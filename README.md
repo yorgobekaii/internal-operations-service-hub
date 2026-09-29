@@ -75,22 +75,24 @@ In a separate terminal, from the repository root:
 ```bash
 npm run start:frontend
 ```
-The Next.js hub will be available at **`http://localhost:3001`** with three routes: `/` executive dashboard, `/new` intake, `/approvals` approval queue.
+The Next.js hub will be available at **`http://localhost:3001`** with `/` dashboard, `/new` intake, `/approvals` approval queue, `/queues` workbench, `/queues/[id]/requests` streams, `/requests/[id]` detail (workflow actions included), and `/admin` queue health.
 
 Exercise the flow in the UI:
 1. Open `http://localhost:3001`, use **AI Intake Assistant**: type `My laptop screen is flickering and won't turn on` -> **Suggest with AI** -> preview `IT / High` -> **Apply & Create Request**.
 2. Or file manually on `/new` (Title `Need access to Jira`, Category `IT`, Priority `Standard`) -> appears as `Submitted`.
-3. Filter the live queue by category/status/search; click **Start Work** -> `In Progress` (Server Action sends `PATCH` with `x-user-role: operator`); click **Resolve** -> `Resolved`. Pending items are also actionable on `/approvals`.
+3. Filter the live queue by category/status/search; click **Start Work** -> `In Progress` (Server Action sends `PATCH` with `x-user-id: <teaching-actor>` — role resolves server-side); click **Resolve** -> `Resolved`. Pending items are also actionable on `/approvals`. Detail pages (`/requests/[id]`) carry the same workflow actions.
 
 ### **5. Exercise the Flow via curl (same contract as the UI)**
 
 Replace `ID` with the `id` returned by the create call. Each command below is a single line (copy-paste safe in Windows PowerShell, `cmd`, and `bash` — no `\` continuations).
 
 ```bash
-# Create (201, status Submitted, default priority Standard)
-curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\"}"
+# Create (201, status Submitted, default priority Standard; IT requires {"system"} in payloadJson)
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -H "x-user-id: maya.requester" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\", \"payloadJson\": \"{\\\"system\\\": \\\"Jira\\\"}\"}"
 # Create with explicit priority (201)
-curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\", \"priority\": \"High\"}"
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -H "x-user-id: maya.requester" -d "{\"title\": \"Need new laptop\", \"category\": \"IT\", \"priority\": \"High\", \"payloadJson\": \"{\\\"system\\\": \\\"Jira\\\"}\"}"
+# Create high-cost Finance (201, auto-gated to Pending Approval with a step for lina.finance-approver)
+curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -H "x-user-id: maya.requester" -d "{\"title\": \"Laptops\", \"category\": \"Finance\", \"payloadJson\": \"{\\\"amount\\\": \\\"4500 USD\\\", \\\"costCenter\\\": \\\"CC-9\\\"}\"}"
 # Save the returned "id" as ID below.
 
 # AI triage suggest (200, advisory only — never writes to DB)
@@ -104,17 +106,26 @@ curl http://localhost:3000/service-requests
 # Get one
 curl http://localhost:3000/service-requests/ID
 
-# Allowed: Submitted -> In Progress with operator role (200)
-curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"In Progress\"}"
+# Allowed: Submitted -> In Progress as IT handler (200, teaching identity via x-user-id)
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-id: omar.it-handler" -d "{\"status\": \"In Progress\"}"
 
-# Allowed: Submitted -> Pending Approval with operator role (200, approval gating per product-spec)
-curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"Pending Approval\"}"
+# Allowed: Submitted -> Pending Approval as handler (200, manual approval gating per product-spec)
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-id: omar.it-handler" -d "{\"status\": \"Pending Approval\"}"
 
 # Denied: same request without role (403)
 curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -d "{\"status\": \"Resolved\"}"
 
 # Valid: In Progress -> Resolved (200)
-curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"Resolved\"}"
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-id: omar.it-handler" -d "{\"status\": \"Resolved\"}"
+
+# Decline with rationale (201, handler/admin, Submitted/In Progress/Blocked only)
+curl -X POST http://localhost:3000/service-requests/ID/decline -H "Content-Type: application/json" -H "x-user-id: omar.it-handler" -d "{\"rationale\": \"Duplicate of INC-42\"}"
+
+# Reassign within the department queue (200, same-queue handlers only)
+curl -X PATCH http://localhost:3000/service-requests/ID/assign -H "Content-Type: application/json" -H "x-user-id: omar.it-handler" -d "{\"ownerId\": \"omar.it-handler\"}"
+
+# Approval steps with rationales (200, scoped to the ticket)
+curl http://localhost:3000/service-requests/ID/approvals -H "x-user-id: maya.requester"
 
 # Expected failure: bad ID (404)
 curl http://localhost:3000/service-requests/non-existent-id
@@ -125,8 +136,8 @@ curl -X POST http://localhost:3000/service-requests -H "Content-Type: applicatio
 # Invalid: unknown category (400, enforced by @IsIn)
 curl -X POST http://localhost:3000/service-requests -H "Content-Type: application/json" -d "{\"title\": \"Bad category\", \"category\": \"Flying\"}"
 
-# Immutable: PATCH on Resolved or Declined (422)
-curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-role: operator" -d "{\"status\": \"In Progress\"}"
+# Immutable: PATCH on Resolved or Declined (422, terminals never reopen)
+curl -X PATCH http://localhost:3000/service-requests/ID/status -H "Content-Type: application/json" -H "x-user-id: omar.it-handler" -d "{\"status\": \"In Progress\"}"
 ```
 
 PowerShell tip: the examples above use backslash-escaped quotes (`\"`) so they work verbatim in both PowerShell and `bash`. In `bash` you may instead use single-quoted bodies, e.g. `-d '{"title": "Need new laptop", "category": "IT"}'`.
@@ -141,19 +152,19 @@ npm test
 
 (`npm test` = `npm run test:backend && npm run test:backend:e2e`.)
 
-**Unit & business-rule tests** (Jest, 4 tests):
+**Unit & business-rule tests** (Jest, 45 tests):
 
 ```bash
 npm run test:backend
 ```
 
-**E2E / integration tests** (Jest + Supertest against a real, isolated SQLite `test.db`, 15 tests — includes auth 403, invalid 400 incl. unknown category, missing 404, immutable 422 for both `Resolved` and `Declined`, approval-gating `Submitted -> Pending Approval -> In Progress`, full POST -> PATCH -> GET lifecycle):
+**E2E / integration tests** (Jest + Supertest against a real, isolated SQLite `test.db`, 41 tests — includes 403 identity matrix, invalid 400 incl. unknown category, missing 404, immutable 422 for both `Resolved` and `Declined`, approval-gating `Submitted -> Pending Approval -> In Progress`, handler decline, department-scoped reassignment, Finance auto-gating, full POST -> PATCH -> GET lifecycle):
 
 ```bash
 npm run test:backend:e2e
 ```
 
-All 19 tests (4 unit + 15 e2e) must pass. See `docs/week3-full-stack-delivery.md` for the exact passing output.
+All 86 tests (45 unit + 41 e2e) must pass. (`docs/week3-full-stack-delivery.md` preserves the historical 19-test output; counts have grown with Slices 1–6.)
 
 **AI evals (Week 4, 8 cases, mock provider — no key needed):**
 
@@ -205,7 +216,7 @@ Without a real `GROQ_API_KEY`, `POST /service-requests/ai-triage` under `AI_PROV
 │   └── frontend/                       # Next.js App Router (React + Tailwind CSS)
 │       └── src/app/
 │           ├── page.tsx                # Dashboard UI (typed with @internal/shared, force-dynamic)
-│           └── actions.ts              # Server Actions (POST/PATCH + x-user-role)
+│           └── actions.ts              # Server Actions (POST/PATCH + x-user-id teaching identity)
 ├── packages/
 │   └── shared/                         # Explicit API contract (statuses, DTOs, transitions, roles)
 │       ├── src/index.ts                # Source (run `npm run build:shared` to compile)
