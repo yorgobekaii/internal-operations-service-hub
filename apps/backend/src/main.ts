@@ -25,6 +25,9 @@ async function bootstrap() {
   const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536
     ? configuredPort
     : 3000;
-  await app.listen(port);
+  // Railway (and any container platform) must bind all interfaces —
+  // the default localhost-only bind is unreachable for healthchecks.
+  await app.listen(port, '0.0.0.0');
+  console.log(`[bootstrap] listening on 0.0.0.0:${port}`);
 }
 bootstrap();

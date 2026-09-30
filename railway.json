@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "npm run start:backend:railway",
+    "startCommand": "node apps/backend/railway-start.mjs",
     "numReplicas": 1,
     "overlapSeconds": 0,
     "healthcheckPath": "/health",

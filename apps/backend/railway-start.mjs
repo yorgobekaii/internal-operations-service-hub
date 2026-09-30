@@ -1,7 +1,10 @@
 // Railway-only entrypoint: persistent SQLite on the /data volume + schema push + boot.
 // Local usage is unchanged — `npm run start:backend` / `start:prod` never touch this file.
-// Railway Start Command (Root Directory = repo root):
-//   npm run start:railway --workspace=@internal/backend
+// Railway Start Command (Root Directory = repo root, single process so Railway
+// signals reach Node directly):
+//   node apps/backend/railway-start.mjs
+// (legacy alias `npm run start:backend:railway` still works but adds npm/sh
+// wrappers that swallow SIGTERM — prefer the direct node command.)
 //
 // Env contract on Railway:
 //   DATABASE_URL=file:/data/prod.db   (volume mount /data on the backend service ONLY)
@@ -11,10 +14,13 @@
 //   1. Defaults DATABASE_URL to file:/data/prod.db when unset (local .env still wins locally).
 //   2. mkdir -p the sqlite parent dir (creates /data on Railway; no-op locally).
 //   3. One-time seed: if SEED_DB_PATH (or prisma/seed.db) exists and target is missing/empty, copy it.
-//   4. Runs `prisma db push --accept-data-loss` (idempotent; creates tables on first boot, no-op after).
-//   5. Boots `node dist/src/main` (built by the Railway build command).
+//   4. Runs `prisma db push --accept-data-loss --skip-generate` (idempotent; the
+//      Prisma Client is already generated at build time via prebuild, so the slow
+//      runtime generate — where Railway SIGTERM used to hit — is skipped).
+//   5. Boots `node dist/src/main` via async spawn with SIGTERM/SIGINT forwarding
+//      so Railway graceful stops reach Nest instead of dying in an sh wrapper.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,8 +72,8 @@ if (targetMissingOrEmpty) {
   console.log('[railway-start] existing db kept (seed skipped to protect prod data)');
 }
 
-console.log('[railway-start] prisma db push --accept-data-loss');
-const push = spawnSync('npx', ['prisma', 'db', 'push', '--accept-data-loss'], {
+console.log('[railway-start] prisma db push --accept-data-loss --skip-generate');
+const push = spawnSync('npx', ['prisma', 'db', 'push', '--accept-data-loss', '--skip-generate'], {
   cwd: backendDir,
   env: process.env,
   stdio: 'inherit',
@@ -79,10 +85,30 @@ if (push.status !== 0) {
 }
 
 console.log('[railway-start] starting backend: node dist/src/main');
-const boot = spawnSync('node', [resolve(backendDir, 'dist/src/main')], {
+const child = spawn('node', [resolve(backendDir, 'dist/src/main')], {
   cwd: backendDir,
   env: process.env,
   stdio: 'inherit',
   shell: false,
 });
-process.exit(boot.status ?? 1);
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    console.log(`[railway-start] received ${signal}, forwarding to backend...`);
+    if (child.exitCode === null && !child.killed) child.kill(signal);
+  });
+}
+const exitCode = await new Promise((resolvePromise) => {
+  child.once('error', (err) => {
+    console.error(`[railway-start] backend failed to start: ${err?.message ?? err}`);
+    resolvePromise(1);
+  });
+  child.once('exit', (code, signal) => {
+    if (signal) {
+      console.log(`[railway-start] backend exited via signal ${signal}`);
+      resolvePromise(signal === 'SIGTERM' || signal === 'SIGINT' ? 0 : 1);
+    } else {
+      resolvePromise(code ?? 1);
+    }
+  });
+});
+process.exit(exitCode);
