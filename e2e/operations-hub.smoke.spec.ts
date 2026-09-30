@@ -12,12 +12,28 @@ async function setActorCookie(page: Page, actorId: string) {
 }
 
 test.describe('Operations Hub critical teaching journeys', () => {
+  test('stale actor sessions recover to role selection', async ({ page }) => {
+    await page.context().addCookies([
+      {
+        name: 'x-user-id',
+        value: 'stale.actor',
+        url: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3001',
+      },
+    ]);
+
+    await page.goto('/');
+    await page.waitForURL('**/select-role');
+    await expect(page.getByRole('heading', { name: 'Select your role' })).toBeVisible();
+    await expect.poll(async () => (await page.context().cookies()).find((cookie) => cookie.name === 'x-user-id')?.value ?? '').toBe('');
+  });
+
   test('requester can use advisory triage and submit an IT request', async ({ page }) => {
     const title = `Playwright IT smoke ${Date.now()}`;
 
     await page.goto('/select-role');
     await page.getByLabel('Select a role').selectOption('maya.requester');
     await page.waitForURL('**/');
+    await expect.poll(async () => (await page.context().cookies()).find((cookie) => cookie.name === 'x-user-id')?.value ?? '').toBe('maya.requester');
     await expect(page.getByRole('heading', { name: 'Service requests, managed with clarity.' })).toBeVisible();
 
     await page.locator('#ai-description').fill('My laptop screen is flickering and will not turn on');

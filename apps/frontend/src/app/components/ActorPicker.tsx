@@ -34,7 +34,7 @@ export function useActorPicker(mode: PickerMode) {
   const [ready, setReady] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const actors = useRuntimeActors();
-  const { actor: resolvedCurrent } = useCurrentActor();
+  const { actor: resolvedCurrent, loading: actorLoading, resolution } = useCurrentActor(ready ? actorId : undefined);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -51,13 +51,51 @@ export function useActorPicker(mode: PickerMode) {
     return () => cancelAnimationFrame(frame);
   }, [isSwitching, mode, pathname]);
 
+  // Safety net: never leave buttons stuck in `isSwitching` if navigation hangs.
+  useEffect(() => {
+    if (!isSwitching) return;
+    const timer = setTimeout(() => setIsSwitching(false), 3000);
+    return () => clearTimeout(timer);
+  }, [isSwitching]);
+
+  // Stale cookie (unknown/inactive actor) recovers to role selection.
+  useEffect(() => {
+    if (!ready || !actorId || actorLoading) return;
+
+    if (resolution === 'invalid') {
+      const frame = requestAnimationFrame(() => {
+        setActorId('');
+        writeActorCookie('');
+        router.replace('/select-role');
+        router.refresh();
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+
+    if (mode === 'landing' && resolution === 'valid') {
+      router.replace('/');
+    }
+  }, [actorId, actorLoading, mode, ready, resolution, router]);
+
+  // Empty sidebar state must never strand the user on `/` with no way out.
+  // proxy.ts covers fresh no-cookie visits, but a stale-cleared or
+  // backend-unreachable session can still land here — bounce to picker.
+  useEffect(() => {
+    if (mode !== 'sidebar' || !ready || actorLoading || actorId || isSwitching) return;
+    if (pathname === '/select-role') return;
+    router.replace('/select-role');
+  }, [actorId, actorLoading, isSwitching, mode, pathname, ready, router]);
+
   function selectActor(value: string) {
-    if (isSwitching || !value.trim()) return;
+    const id = value.trim();
+    if (isSwitching || !id) return;
     setIsSwitching(true);
-    setActorId(value);
-    writeActorCookie(value.trim());
-    router.replace('/');
-    router.refresh();
+    setActorId(id);
+    writeActorCookie(id);
+    // Use a hard navigation so proxy.ts sees the fresh `x-user-id` cookie.
+    // Client-side router.replace+refresh can race and leave /select-role stuck.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign('/');
   }
 
   function logOff() {
@@ -65,11 +103,13 @@ export function useActorPicker(mode: PickerMode) {
     setIsSwitching(true);
     setActorId('');
     writeActorCookie('');
-    router.replace('/select-role');
-    router.refresh();
+    // Hard navigation for the same reason: always escape to the picker.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign('/select-role');
   }
 
-  const current = actors.find((actor) => actor.id === actorId) ?? resolvedCurrent;
+  // When logged off (no cookie) never show a stale resolved actor.
+  const current = actorId ? (actors.find((actor) => actor.id === actorId) ?? resolvedCurrent) : null;
 
   return {
     actorId,
@@ -77,6 +117,8 @@ export function useActorPicker(mode: PickerMode) {
     actors,
     isSwitching,
     ready,
+    actorLoading,
+    resolution,
     selectActor,
     logOff,
   };
@@ -142,6 +184,14 @@ export default function ActorPicker({ mode }: { mode: PickerMode }) {
         >
           Log off
         </button>
+      )}
+      {!isLanding && !current && (
+        <a
+          href="/select-role"
+          className="rounded-lg border border-indigo-700 px-2 py-1 text-xs text-indigo-200 hover:bg-indigo-900 hover:text-white"
+        >
+          Choose actor
+        </a>
       )}
       <div aria-live="polite" role="status" className="sr-only">
         {isSwitching

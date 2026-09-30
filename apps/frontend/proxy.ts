@@ -11,10 +11,6 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(ROLE_PICKER_PATH, request.url));
   }
 
-  if (hasActor && pathname === ROLE_PICKER_PATH) {
-    return NextResponse.redirect(new URL('/', request.url));
-  }
-
   return NextResponse.next();
 }
 

@@ -47,15 +47,25 @@ export default function RoleSwitcher() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={logOff}
-          disabled={isSwitching || !current}
-          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-xs font-semibold text-indigo-300 transition hover:border-rose-400/30 hover:bg-rose-500/10 hover:text-rose-200 focus:outline-none focus:ring-4 focus:ring-blue-500/15 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          <span aria-hidden="true">↪</span>
-          Log off
-        </button>
+        {current ? (
+          <button
+            type="button"
+            onClick={logOff}
+            disabled={isSwitching}
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-xs font-semibold text-indigo-300 transition hover:border-rose-400/30 hover:bg-rose-500/10 hover:text-rose-200 focus:outline-none focus:ring-4 focus:ring-blue-500/15 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <span aria-hidden="true">↪</span>
+            Log off
+          </button>
+        ) : (
+          <a
+            href="/select-role"
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-400/40 bg-blue-500/15 px-2.5 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/25 focus:outline-none focus:ring-4 focus:ring-blue-500/15"
+          >
+            <span aria-hidden="true">→</span>
+            Choose actor
+          </a>
+        )}
       </div>
 
       <div aria-live="polite" role="status" className="sr-only">
