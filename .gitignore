@@ -5,3 +5,9 @@ postman/
 test-results/
 playwright-report/
 apps/backend/.env
+# Railway persistent SQLite (volume file must never be committed)
+apps/backend/prisma/prod.db*
+apps/backend/prisma/seed.db*
+*.db-wal
+*.db-shm
+*.db-journal

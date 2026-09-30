@@ -2,6 +2,9 @@
   "name": "internal-operations-service-hub",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -21,7 +24,8 @@
     "test:e2e:frontend": "playwright test --config=playwright.config.ts",
     "playwright:install": "playwright install chromium",
     "health:check": "node scripts/health-check.mjs",
-    "verify:release": "node scripts/verify-release.mjs"
+    "verify:release": "node scripts/verify-release.mjs",
+    "start:backend:railway": "npm run start:railway --workspace=@internal/backend"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
