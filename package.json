@@ -17,7 +17,7 @@
     "start:frontend": "npm run dev --workspace=frontend -- -p 3001",
     "build:backend": "npm run build --workspace=@internal/shared && npm run build --workspace=@internal/backend",
     "build:frontend": "npm run build --workspace=@internal/shared && npm run build --workspace=frontend",
-    "start:frontend:railway": "npm run start --workspace=frontend -- start -p $PORT",
+    "start:frontend:railway": "npm run start --workspace=frontend -- -p $PORT",
     "start": "npm run start:backend:railway",
     "test": "npm run test:backend && npm run test:backend:e2e",
     "test:backend": "npm run build --workspace=@internal/shared && npm run test --workspace=@internal/backend",
