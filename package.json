@@ -19,6 +19,7 @@
     "eval:triage": "npm run build --workspace=@internal/shared && npm run test:eval --workspace=@internal/backend",
     "eval": "npm run eval:triage",
     "test:e2e:frontend": "playwright test --config=playwright.config.ts",
+    "playwright:install": "playwright install chromium",
     "health:check": "node scripts/health-check.mjs",
     "verify:release": "node scripts/verify-release.mjs"
   },
